@@ -1,0 +1,20 @@
+{
+  "name": "aethelgard-3d-voxel-rpg",
+  "private": true,
+  "version": "1.0.0",
+  "description": "3D Voxel Sandbox Action-RPG with 6-tier custom progression, custom monsters, custom bosses, and mythic weapons built with Three.js & TypeScript.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}
