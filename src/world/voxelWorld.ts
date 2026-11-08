@@ -663,7 +663,11 @@ export class VoxelWorld {
     }
   }
 
-  public resetWorldMods(): void {
+  public resetWorldMods(newSeed?: number): void {
+    if (newSeed !== undefined) {
+      this.seed = newSeed;
+      this.noise = new SeededNoise(this.seed);
+    }
     this.modifiedBlocks.clear();
     localStorage.removeItem('aethelgard_world_mods');
     for (const chunk of this.chunks.values()) {

@@ -31,6 +31,11 @@ export class PlayerController {
   public unlockedTier: ProgressionTier = 1;
   public defeatedBosses: Set<string> = new Set();
 
+  // World & Cheats configuration
+  public worldName = 'Realm of Aethelgard';
+  public cheatsEnabled = false;
+  public hasSavedWorld = false;
+
   // Inventory: 9 hotbar slots (0..8) + 27 backpack slots (9..35)
   public inventory: (InventorySlot | null)[] = new Array(36).fill(null);
   public selectedHotbarIndex = 0;
@@ -502,7 +507,8 @@ export class PlayerController {
     this.heldMeshGroup.add(orb);
   }
 
-  public grantTierSandboxKit(tier: ProgressionTier): void {
+  public grantTierSandboxKit(tier: ProgressionTier): boolean {
+    if (!this.cheatsEnabled) return false;
     this.unlockedTier = Math.max(this.unlockedTier, tier) as ProgressionTier;
     const tierRecipes = RECIPES.filter((r) => r.tier === tier);
     for (const r of tierRecipes) {
@@ -521,17 +527,50 @@ export class PlayerController {
     this.mana = this.maxMana;
     sound.playFanfare();
     this.savePlayerState();
+    return true;
+  }
+
+  public grantCheatItem(itemId: string, count = 1): boolean {
+    if (!this.cheatsEnabled) return false;
+    const ok = this.addItem(itemId, count);
+    if (ok) {
+      sound.playPickup();
+      this.savePlayerState();
+    }
+    return ok;
+  }
+
+  public createNewWorld(worldName: string, seed: number, cheatsEnabled: boolean): void {
+    this.worldName = worldName.trim() || 'Realm of Aethelgard';
+    this.cheatsEnabled = cheatsEnabled;
+    this.unlockedTier = 1;
+    this.defeatedBosses.clear();
+    this.initStarterInventory();
+    this.recalculateStats();
+    this.hp = this.maxHp;
+    this.mana = this.maxMana;
+
+    this.world.resetWorldMods(seed);
+    const spawnY = this.world.getSurfaceHeight(6, 9) + 2.8;
+    this.position.set(6.5, spawnY, 9.5);
+    this.velocity.set(0, 0, 0);
+    this.hasSavedWorld = true;
+    this.savePlayerState();
   }
 
   public savePlayerState(): void {
     try {
       const state = {
+        worldName: this.worldName,
+        seed: this.world.seed,
+        cheatsEnabled: this.cheatsEnabled,
         inventory: this.inventory,
         equippedArmorId: this.equippedArmorId,
         unlockedTier: this.unlockedTier,
         defeatedBosses: Array.from(this.defeatedBosses),
       };
       localStorage.setItem('aethelgard_player_state', JSON.stringify(state));
+      this.hasSavedWorld = true;
     } catch {
       // ignore storage errors
     }
@@ -540,8 +579,21 @@ export class PlayerController {
   public loadPlayerState(): void {
     try {
       const raw = localStorage.getItem('aethelgard_player_state');
-      if (!raw) return;
+      if (!raw) {
+        this.hasSavedWorld = false;
+        return;
+      }
       const state = JSON.parse(raw);
+      this.hasSavedWorld = true;
+      if (typeof state.worldName === 'string') {
+        this.worldName = state.worldName;
+      }
+      if (typeof state.cheatsEnabled === 'boolean') {
+        this.cheatsEnabled = state.cheatsEnabled;
+      }
+      if (typeof state.seed === 'number') {
+        this.world.seed = state.seed;
+      }
       if (Array.isArray(state.inventory) && state.inventory.length === 36) {
         this.inventory = state.inventory;
       }

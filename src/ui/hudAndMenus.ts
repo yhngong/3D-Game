@@ -13,9 +13,11 @@ export class HudAndMenuManager {
   public atlas: TextureAtlasManager;
 
   public isMenuOpen = false;
+  public isWorldCreationOpen = false;
   public activeTab: 'craft' | 'codex' | 'help' = 'craft';
   public selectedCraftTier: ProgressionTier | 0 = 0;
   public selectedCraftCategory = 'all';
+  private pendingWorldCheats = false;
 
   private hpFillEl!: HTMLElement;
   private hpTextEl!: HTMLElement;
@@ -45,6 +47,7 @@ export class HudAndMenuManager {
 
   private modalOverlay!: HTMLElement;
   private modalContent!: HTMLElement;
+  private worldCreateOverlay!: HTMLElement;
 
   constructor(player: PlayerController, entities: EntityManager, atlas: TextureAtlasManager) {
     this.player = player;
@@ -52,6 +55,7 @@ export class HudAndMenuManager {
     this.atlas = atlas;
 
     this.buildDomStructure();
+    this.openWorldCreationScreen();
 
     this.entities.onDamageNumber = (pos, amount, color, isCrit) => {
       this.spawnFloatingDamage(pos, amount, color, isCrit);
@@ -146,6 +150,9 @@ export class HudAndMenuManager {
           <div id="modal-content" class="modal-content"></div>
         </div>
       </div>
+
+      <!-- World Creation / Title Screen Overlay -->
+      <div id="world-create-overlay" class="modal-overlay" style="display:none;"></div>
     `;
 
     this.hpFillEl = document.getElementById('hp-fill')!;
@@ -176,6 +183,7 @@ export class HudAndMenuManager {
 
     this.modalOverlay = document.getElementById('modal-overlay')!;
     this.modalContent = document.getElementById('modal-content')!;
+    this.worldCreateOverlay = document.getElementById('world-create-overlay')!;
 
     document.getElementById('tab-btn-craft')!.addEventListener('click', () => {
       this.switchTab('craft');
@@ -193,7 +201,134 @@ export class HudAndMenuManager {
     this.renderHotbar();
   }
 
+  public openWorldCreationScreen(): void {
+    this.isWorldCreationOpen = true;
+    this.isMenuOpen = true;
+    this.modalOverlay.style.display = 'none';
+    this.worldCreateOverlay.style.display = 'flex';
+    document.exitPointerLock?.();
+    this.pendingWorldCheats = false;
+    this.renderWorldCreationScreen();
+  }
+
+  private renderWorldCreationScreen(): void {
+    const hasSave = this.player.hasSavedWorld;
+    const randomDefaultSeed = Math.floor(1000 + Math.random() * 900000);
+
+    this.worldCreateOverlay.innerHTML = `
+      <div class="world-create-card">
+        <div class="world-create-title">AETHELGARD: REALMS OF THE ASTRAL FORGE</div>
+        <div class="world-create-sub">3D Voxel Sandbox Action-RPG • 6 Custom Tiers • 5 Multi-Phase Bosses</div>
+
+        ${
+          hasSave
+            ? `
+          <div class="saved-world-box">
+            <div>
+              <div class="saved-world-name">Saved World: ${this.player.worldName}</div>
+              <div class="saved-world-meta">
+                Tier ${this.player.unlockedTier} • Seed: ${this.player.world.seed} • Cheats: 
+                <strong style="color:${this.player.cheatsEnabled ? '#4ade80' : '#f87171'}">
+                  ${this.player.cheatsEnabled ? 'ENABLED' : 'DISABLED (Survival)'}
+                </strong>
+              </div>
+            </div>
+            <button id="continue-world-btn" class="world-primary-btn">Continue Saved World</button>
+          </div>
+          <div class="world-divider"><span>OR CREATE A NEW WORLD</span></div>
+        `
+            : ''
+        }
+
+        <div class="world-form">
+          <div class="world-field">
+            <label>World Name</label>
+            <input id="new-world-name" type="text" value="New Aethelgard Realm" maxlength="32" class="world-input" />
+          </div>
+          <div class="world-field">
+            <label>World Seed</label>
+            <div style="display:flex; gap:8px;">
+              <input id="new-world-seed" type="number" value="${randomDefaultSeed}" class="world-input" />
+              <button id="rand-seed-btn" type="button" class="codex-btn kit-btn">Randomize</button>
+            </div>
+          </div>
+          <div class="world-field">
+            <label>Allow Cheats (Grant Items & Instant Boss Summons)</label>
+            <button id="toggle-world-cheats-btn" type="button" class="cheats-toggle-btn ${
+              this.pendingWorldCheats ? 'on' : 'off'
+            }">
+              Allow Cheats: ${this.pendingWorldCheats ? 'ON (Creative / Item Grant Unlocked)' : 'OFF (Legitimate Survival Progression)'}
+            </button>
+            <div class="cheats-hint">
+              ${
+                this.pendingWorldCheats
+                  ? '⚡ You will be able to grant yourself any Item, Tier Gear Kit, or summon Bosses directly from the Codex [P].'
+                  : '🔒 You cannot grant yourself items. All weapons, armor, and Boss Relics must be mined and forged legitimately!'
+              }
+            </div>
+          </div>
+
+          <button id="create-world-submit-btn" type="button" class="world-create-submit-btn">
+            Create New World & Play
+          </button>
+        </div>
+      </div>
+    `;
+
+    const continueBtn = document.getElementById('continue-world-btn');
+    if (continueBtn) {
+      continueBtn.addEventListener('click', () => {
+        this.isWorldCreationOpen = false;
+        this.isMenuOpen = false;
+        this.worldCreateOverlay.style.display = 'none';
+        const canvas = document.querySelector('canvas');
+        canvas?.requestPointerLock?.();
+      });
+    }
+
+    document.getElementById('rand-seed-btn')!.addEventListener('click', () => {
+      const seedInput = document.getElementById('new-world-seed') as HTMLInputElement;
+      seedInput.value = String(Math.floor(1000 + Math.random() * 900000));
+    });
+
+    const cheatBtn = document.getElementById('toggle-world-cheats-btn')!;
+    cheatBtn.addEventListener('click', () => {
+      const nameVal = (document.getElementById('new-world-name') as HTMLInputElement).value;
+      const seedVal = (document.getElementById('new-world-seed') as HTMLInputElement).value;
+      this.pendingWorldCheats = !this.pendingWorldCheats;
+      this.renderWorldCreationScreen();
+      (document.getElementById('new-world-name') as HTMLInputElement).value = nameVal;
+      (document.getElementById('new-world-seed') as HTMLInputElement).value = seedVal;
+    });
+
+    document.getElementById('create-world-submit-btn')!.addEventListener('click', () => {
+      const nameVal = (document.getElementById('new-world-name') as HTMLInputElement).value || 'New Aethelgard Realm';
+      const seedVal = Number((document.getElementById('new-world-seed') as HTMLInputElement).value) || 2026;
+
+      this.player.createNewWorld(nameVal, seedVal, this.pendingWorldCheats);
+      for (let i = 0; i < 12; i++) {
+        this.player.world.updateChunksAroundPlayer(this.player.position.x, this.player.position.z, 3);
+      }
+      this.renderHotbar();
+
+      this.isWorldCreationOpen = false;
+      this.isMenuOpen = false;
+      this.worldCreateOverlay.style.display = 'none';
+      const canvas = document.querySelector('canvas');
+      canvas?.requestPointerLock?.();
+
+      this.showBanner(
+        `WELCOME TO ${this.player.worldName.toUpperCase()}`,
+        this.player.cheatsEnabled
+          ? 'Cheats Enabled — Open Codex [P] anytime to grant items or gear!'
+          : 'Survival Mode (Cheats OFF) — Mine ores & forge gear at [E]!',
+        this.player.cheatsEnabled ? '#4ade80' : '#38bdf8'
+      );
+    });
+  }
+
   public toggleMenu(forceState?: boolean, tab?: 'craft' | 'codex' | 'help'): void {
+    if (this.isWorldCreationOpen) return;
     this.isMenuOpen = forceState !== undefined ? forceState : !this.isMenuOpen;
     if (tab) this.activeTab = tab;
 
@@ -513,6 +648,12 @@ export class HudAndMenuManager {
 
   private renderCodexTab(): void {
     const tiers: ProgressionTier[] = [1, 2, 3, 4, 5, 6];
+    const cheatsOn = this.player.cheatsEnabled;
+
+    const itemOptionsHtml = Object.values(ITEMS)
+      .map((item) => `<option value="${item.id}">[Tier ${item.tier}] ${item.name}</option>`)
+      .join('');
+
     const cardsHtml = tiers
       .map((t) => {
         const meta = TIER_NAMES[t];
@@ -528,11 +669,17 @@ export class HudAndMenuManager {
                 <div class="codex-tier-sub">${meta.subtitle}</div>
               </div>
               <div class="codex-actions">
-                <button class="codex-btn kit-btn" data-kit-tier="${t}">Grant Tier ${t} Gear Kit</button>
                 ${
-                  boss
-                    ? `<button class="codex-btn summon-btn" data-summon-boss="${boss.id}">Summon ${boss.name}</button>`
-                    : ''
+                  cheatsOn
+                    ? `
+                      <button class="codex-btn kit-btn" data-kit-tier="${t}">Grant Tier ${t} Gear Kit</button>
+                      ${
+                        boss
+                          ? `<button class="codex-btn summon-btn" data-summon-boss="${boss.id}">Summon ${boss.name}</button>`
+                          : ''
+                      }
+                    `
+                    : `<span class="cheats-locked-pill">🔒 Cheats Disabled</span>`
                 }
               </div>
             </div>
@@ -555,34 +702,76 @@ export class HudAndMenuManager {
       <div class="codex-wrap">
         <div class="codex-intro">
           <h3>Aethelgard Custom 6-Tier Progression (No Netherite • No Ender Dragon)</h3>
-          <p>Progress organically by mining custom ores, slaying biome monsters, forging mythic weapons, and defeating all 5 multi-phase bosses—or use the Sandbox buttons below to immediately test any Tier's weapons and boss fights!</p>
+          ${
+            cheatsOn
+              ? `
+                <div class="cheat-spawner-bar">
+                  <span>⚡ <strong>Cheats Enabled (${this.player.worldName}):</strong> Grant yourself any item or Tier Kit:</span>
+                  <div style="display:flex; gap:8px; align-items:center;">
+                    <select id="cheat-item-select" class="modal-select">${itemOptionsHtml}</select>
+                    <input id="cheat-item-count" type="number" value="1" min="1" max="99" class="world-input" style="width:70px; padding:6px;" />
+                    <button id="grant-single-item-btn" class="codex-btn kit-btn">Grant Item</button>
+                  </div>
+                </div>
+              `
+              : `
+                <div class="cheat-locked-banner">
+                  🔒 <strong>Cheats are DISABLED in "${this.player.worldName}".</strong> Item granting is locked. To grant yourself items, click <em>Controls & World Settings → Create New World</em> and set <strong>Allow Cheats: ON</strong>.
+                </div>
+              `
+          }
         </div>
         <div class="codex-grid">${cardsHtml}</div>
       </div>
     `;
 
-    this.modalContent.querySelectorAll('.kit-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const tier = Number((btn as HTMLElement).dataset.kitTier) as ProgressionTier;
-        this.player.grantTierSandboxKit(tier);
-        this.renderHotbar();
-        this.showBanner(`TIER ${tier} GEAR GRANTED!`, `${TIER_NAMES[tier].name} weapons & armor equipped.`, TIER_NAMES[tier].color);
-      });
-    });
+    if (cheatsOn) {
+      const grantSingleBtn = document.getElementById('grant-single-item-btn');
+      if (grantSingleBtn) {
+        grantSingleBtn.addEventListener('click', () => {
+          const itemId = (document.getElementById('cheat-item-select') as HTMLSelectElement).value;
+          const count = Math.max(
+            1,
+            Math.min(99, Number((document.getElementById('cheat-item-count') as HTMLInputElement).value) || 1)
+          );
+          if (this.player.grantCheatItem(itemId, count)) {
+            this.renderHotbar();
+            const def = ITEMS[itemId];
+            this.showBanner('ITEM GRANTED!', `Added ${count}x ${def.name} to your inventory.`, TIER_NAMES[def.tier].color);
+          }
+        });
+      }
 
-    this.modalContent.querySelectorAll('.summon-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const bossId = (btn as HTMLElement).dataset.summonBoss!;
-        this.toggleMenu(false);
-        this.entities.summonBoss(bossId);
+      this.modalContent.querySelectorAll('.kit-btn[data-kit-tier]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tier = Number((btn as HTMLElement).dataset.kitTier) as ProgressionTier;
+          if (this.player.grantTierSandboxKit(tier)) {
+            this.renderHotbar();
+            this.showBanner(
+              `TIER ${tier} GEAR GRANTED!`,
+              `${TIER_NAMES[tier].name} weapons & armor equipped.`,
+              TIER_NAMES[tier].color
+            );
+          }
+        });
       });
-    });
+
+      this.modalContent.querySelectorAll('.summon-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const bossId = (btn as HTMLElement).dataset.summonBoss!;
+          this.toggleMenu(false);
+          this.entities.summonBoss(bossId);
+        });
+      });
+    }
   }
 
   private renderHelpTab(): void {
     this.modalContent.innerHTML = `
       <div class="help-wrap">
-        <h3>Controls & Combat Guide</h3>
+        <h3>Current World: ${this.player.worldName} (Seed: ${this.player.world.seed} • Cheats: ${
+      this.player.cheatsEnabled ? 'ON' : 'OFF'
+    })</h3>
         <div class="help-grid">
           <div class="help-item"><kbd>W A S D</kbd> Move / Strafe</div>
           <div class="help-item"><kbd>Space</kbd> Jump / Double-Jump / Hold to Glide (Tier V–VI Armor)</div>
@@ -595,7 +784,7 @@ export class HudAndMenuManager {
           <div class="help-item"><kbd>P</kbd> Open 6-Tier Progression & Boss Codex</div>
         </div>
         <div style="margin-top:20px; display:flex; gap:12px;">
-          <button id="reset-world-btn" class="codex-btn summon-btn">Reset World & Starter Save</button>
+          <button id="open-new-world-modal-btn" class="codex-btn summon-btn">Create New World (Configure Seed & Cheats)</button>
           <button id="toggle-mute-btn" class="codex-btn kit-btn">${
             sound.muted ? 'Unmute Sound Effects' : 'Mute Sound Effects'
           }</button>
@@ -603,10 +792,8 @@ export class HudAndMenuManager {
       </div>
     `;
 
-    document.getElementById('reset-world-btn')!.addEventListener('click', () => {
-      localStorage.removeItem('aethelgard_player_state');
-      this.player.world.resetWorldMods();
-      window.location.reload();
+    document.getElementById('open-new-world-modal-btn')!.addEventListener('click', () => {
+      this.openWorldCreationScreen();
     });
 
     document.getElementById('toggle-mute-btn')!.addEventListener('click', (e) => {
