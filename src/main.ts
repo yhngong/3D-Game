@@ -393,6 +393,15 @@ class AethelgardGame {
   }
 
   private consumeSelectedPotion(item: typeof ITEMS[string]): void {
+    if (this.player.potionCooldownTimer > 0) {
+      this.ui.showBanner(
+        '⏳ POTION COOLDOWN',
+        `Wait ${this.player.potionCooldownTimer.toFixed(1)}s before drinking another potion`,
+        '#f59e0b'
+      );
+      return;
+    }
+    this.player.potionCooldownTimer = 4.5;
     this.player.hp = Math.min(this.player.maxHp, this.player.hp + (item.healHp || 50));
     this.player.mana = Math.min(this.player.maxMana, this.player.mana + (item.healMana || 40));
     sound.playPickup();

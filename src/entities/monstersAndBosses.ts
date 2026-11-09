@@ -490,7 +490,7 @@ export class EntityManager {
 
     if (dist > 0.1) {
       b.yaw = Math.atan2(dx, dz);
-      const desiredDist = 5.5;
+      const desiredDist = 2.6;
       if (dist > desiredDist) {
         const spd = b.def.speed * phase.speedMult * chillMult;
         b.velocity.x = (dx / dist) * spd;
@@ -541,8 +541,8 @@ export class EntityManager {
     }
 
     // Contact melee damage if very close
-    if (dist < 3.6 && Math.abs(this.player.position.y - b.position.y) < 4.5) {
-      this.player.takeDamage(Math.round(b.def.damage * 0.75));
+    if (dist < 3.8 && Math.abs(this.player.position.y - b.position.y) < 4.5) {
+      this.player.takeDamage(Math.round(b.def.damage * 0.85));
     }
 
     // Boss special attacks
@@ -571,10 +571,26 @@ export class EntityManager {
       case 'magma_volley':
       case 'void_lance_barrage':
       case 'starlight_lance': {
+        const isLast3 = attack === 'magma_volley' || attack === 'void_lance_barrage' || attack === 'starlight_lance';
         const isFinal2 = attack === 'void_lance_barrage' || attack === 'starlight_lance';
-        const count = attack === 'starlight_lance' ? 9 : attack === 'void_lance_barrage' ? 7 : 5;
-        const spread = isFinal2 ? 0.14 : 0.18;
-        const projSpeed = attack === 'starlight_lance' ? 27 : attack === 'void_lance_barrage' ? 24 : 18;
+        const count =
+          attack === 'starlight_lance'
+            ? 9
+            : attack === 'void_lance_barrage'
+              ? 7
+              : attack === 'magma_volley'
+                ? 7
+                : 5;
+        const spread = isFinal2 ? 0.13 : isLast3 ? 0.15 : 0.18;
+        const projSpeed =
+          attack === 'starlight_lance'
+            ? 29
+            : attack === 'void_lance_barrage'
+              ? 26
+              : attack === 'magma_volley'
+                ? 22
+                : 18;
+        const centerIdx = Math.floor(count / 2);
         for (let i = 0; i < count; i++) {
           const offsetAngle = (i - (count - 1) / 2) * spread;
           const dir = toPlayer.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), offsetAngle);
@@ -583,11 +599,13 @@ export class EntityManager {
             velocity: dir.multiplyScalar(projSpeed),
             fromPlayer: false,
             damage: b.def.damage,
-            radius: isFinal2 ? 0.44 : 0.35,
+            radius: isFinal2 ? 0.46 : isLast3 ? 0.42 : 0.35,
             color: b.def.glowColor,
-            maxLife: 3.5,
-            gravity: attack === 'magma_volley' ? 3.5 : 0,
-            explosiveRadius: attack === 'magma_volley' ? 3.0 : attack === 'starlight_lance' ? 2.6 : undefined,
+            maxLife: 3.6,
+            gravity: attack === 'magma_volley' ? 2.8 : 0,
+            homing: isFinal2 && i === centerIdx,
+            explosiveRadius:
+              attack === 'magma_volley' ? 3.4 : attack === 'starlight_lance' ? 2.8 : undefined,
           });
         }
         sound.playMagicCast(0.7);
@@ -598,12 +616,35 @@ export class EntityManager {
       case 'frost_nova':
       case 'lava_shockwave':
       case 'cosmic_nova': {
-        const radius = attack === 'cosmic_nova' ? 13.0 : 9.5;
+        const radius =
+          attack === 'cosmic_nova'
+            ? 13.5
+            : attack === 'lava_shockwave'
+              ? 11.5
+              : 9.5;
         this.spawnShockwave(b.position, radius, b.def.accentColor);
         sound.playExplosion();
         if (this.player.position.distanceTo(b.position) <= radius) {
-          this.player.takeDamage(b.def.damage);
-          this.player.velocity.y = 8.5;
+          this.player.takeDamage(Math.round(b.def.damage * 1.1));
+          this.player.velocity.y = 9.0;
+        }
+        // Ignis Rex's lava_shockwave also erupts radial magma fireballs!
+        if (attack === 'lava_shockwave') {
+          for (let i = 0; i < 10; i++) {
+            const angle = (i / 10) * Math.PI * 2;
+            const dir = new THREE.Vector3(Math.cos(angle), 0.12, Math.sin(angle)).normalize();
+            this.spawnProjectile({
+              position: center.clone(),
+              velocity: dir.multiplyScalar(19),
+              fromPlayer: false,
+              damage: Math.round(b.def.damage * 0.9),
+              radius: 0.4,
+              color: b.def.accentColor,
+              maxLife: 3.0,
+              gravity: 3.2,
+              explosiveRadius: 2.5,
+            });
+          }
         }
         break;
       }
@@ -646,6 +687,34 @@ export class EntityManager {
             b.position.clone().add(new THREE.Vector3(3, 1, 3))
           );
         }
+        break;
+      }
+
+      case 'summon_crawlers': {
+        const crawlerDef = MONSTERS.find((m) => m.id === 'crystal_crawler') || MONSTERS[0];
+        if (this.monsters.length < 11) {
+          for (const side of [-1, 1]) {
+            this.spawnMonster(
+              crawlerDef,
+              b.position.clone().add(new THREE.Vector3(side * 3.5, 1, 2.5))
+            );
+          }
+        }
+        sound.playMagicCast(0.4);
+        break;
+      }
+
+      case 'summon_magma_brutes': {
+        const bruteDef = MONSTERS.find((m) => m.id === 'magma_brute') || MONSTERS[0];
+        if (this.monsters.length < 12) {
+          for (const side of [-1, 1]) {
+            this.spawnMonster(
+              bruteDef,
+              b.position.clone().add(new THREE.Vector3(side * 4, 1.5, 3))
+            );
+          }
+        }
+        sound.playMagicCast(0.6);
         break;
       }
 
@@ -720,21 +789,21 @@ export class EntityManager {
       }
 
       case 'meteor_rain': {
-        const count = b.def.tier >= 5 ? 7 : 4;
+        const count = b.def.tier >= 6 ? 9 : b.def.tier >= 4 ? 7 : 4;
         for (let i = 0; i < count; i++) {
           const skyPos = this.player.position
             .clone()
-            .add(new THREE.Vector3((Math.random() - 0.5) * 11, 15 + i * 1.6, (Math.random() - 0.5) * 11));
+            .add(new THREE.Vector3((Math.random() - 0.5) * 10, 14 + i * 1.4, (Math.random() - 0.5) * 10));
           this.spawnProjectile({
             position: skyPos,
-            velocity: new THREE.Vector3(0, -22, 0),
+            velocity: new THREE.Vector3((Math.random() - 0.5) * 3, -24, (Math.random() - 0.5) * 3),
             fromPlayer: false,
-            damage: b.def.damage,
-            radius: 0.6,
+            damage: Math.round(b.def.damage * 1.05),
+            radius: 0.65,
             color: b.def.accentColor,
             maxLife: 2.5,
-            gravity: 5.0,
-            explosiveRadius: 4.2,
+            gravity: 5.5,
+            explosiveRadius: 4.5,
           });
         }
         sound.playExplosion();
@@ -794,7 +863,7 @@ export class EntityManager {
         position: camPos.clone().add(camDir.clone().multiplyScalar(1.0)),
         velocity: camDir.clone().multiplyScalar(28),
         fromPlayer: true,
-        damage: Math.round(baseDmg * 0.75),
+        damage: Math.round(baseDmg * 0.45),
         radius: 0.55,
         color: '#fde047',
         maxLife: 1.8,

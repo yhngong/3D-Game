@@ -65,6 +65,7 @@ export class PlayerController {
   // Cooldowns & animations
   public attackCooldownTimer = 0;
   public abilityCooldownTimer = 0;
+  public potionCooldownTimer = 0;
   public dashCooldownTimer = 0;
   public dashActiveTimer = 0;
   public recallCooldownTimer = 0;
@@ -222,18 +223,18 @@ export class PlayerController {
 
     this.maxHp = baseHp;
     this.maxMana = baseMana;
-    this.defense = Math.min(82, def);
+    this.defense = Math.min(60, def);
     if (this.hp > this.maxHp) this.hp = this.maxHp;
     if (this.mana > this.maxMana) this.mana = this.maxMana;
   }
 
   public getDamageMultiplier(): number {
-    const skillMult = (this.skills.might || 0) * 0.08;
+    const skillMult = (this.skills.might || 0) * 0.06;
     const trinketMult =
       this.equippedTrinketId && ITEMS[this.equippedTrinketId]
         ? ITEMS[this.equippedTrinketId].bonusDamageMult || 0
         : 0;
-    const levelMult = (this.level - 1) * 0.03;
+    const levelMult = (this.level - 1) * 0.02;
     return 1 + skillMult + trinketMult + levelMult;
   }
 
@@ -553,10 +554,10 @@ export class PlayerController {
 
   public takeDamage(rawDamage: number): number {
     if (this.hurtInvulnTimer > 0) return 0;
-    const reduction = Math.min(0.82, this.defense / 100);
+    const reduction = Math.min(0.6, this.defense / 100);
     const finalDmg = Math.max(1, Math.round(rawDamage * (1 - reduction)));
     this.hp = Math.max(0, this.hp - finalDmg);
-    this.hurtInvulnTimer = 0.45;
+    this.hurtInvulnTimer = 0.42;
     sound.playPlayerHurt();
 
     if (this.hp <= 0) {
@@ -573,6 +574,7 @@ export class PlayerController {
   public update(dt: number): void {
     this.attackCooldownTimer = Math.max(0, this.attackCooldownTimer - dt);
     this.abilityCooldownTimer = Math.max(0, this.abilityCooldownTimer - dt);
+    this.potionCooldownTimer = Math.max(0, this.potionCooldownTimer - dt);
     this.dashCooldownTimer = Math.max(0, this.dashCooldownTimer - dt);
     this.dashActiveTimer = Math.max(0, this.dashActiveTimer - dt);
     this.recallCooldownTimer = Math.max(0, this.recallCooldownTimer - dt);
@@ -581,14 +583,14 @@ export class PlayerController {
     const armor = this.equippedArmorId ? ITEMS[this.equippedArmorId] : null;
     const trinket = this.equippedTrinketId ? ITEMS[this.equippedTrinketId] : null;
 
-    // Passive HP & Mana Regeneration (boosted by Tier, Vitality/Arcane skills, and Trinkets)
-    const tierBonus = this.unlockedTier * 0.4;
-    const vitalityRegen = (this.skills.vitality || 0) * 1.2;
+    // Balanced Passive HP & Mana Regeneration (boosted by Tier, Vitality/Arcane skills, and Trinkets)
+    const tierBonus = this.unlockedTier * 0.25;
+    const vitalityRegen = (this.skills.vitality || 0) * 0.7;
     const trinketRegen = trinket?.bonusRegen || 0;
-    const arcaneMult = 1 + (this.skills.arcane || 0) * 0.2;
+    const arcaneMult = 1 + (this.skills.arcane || 0) * 0.18;
 
-    this.hp = Math.min(this.maxHp, this.hp + (1.8 + tierBonus + vitalityRegen + trinketRegen) * dt);
-    this.mana = Math.min(this.maxMana, this.mana + (9.5 + tierBonus * 2.5) * arcaneMult * dt);
+    this.hp = Math.min(this.maxHp, this.hp + (1.0 + tierBonus + vitalityRegen + trinketRegen) * dt);
+    this.mana = Math.min(this.maxMana, this.mana + (8.5 + tierBonus * 2.2) * arcaneMult * dt);
 
     const armorSpeed = armor?.speedMultiplier || 1.0;
     const trinketSpeed = trinket?.speedMultiplier || 1.0;
