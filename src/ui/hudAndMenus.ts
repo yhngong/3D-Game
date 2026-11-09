@@ -435,7 +435,7 @@ export class HudAndMenuManager {
     targetBlockId: BlockId | null,
     breakProgress: number,
     isNightTime = false,
-    secondsUntilChange = 180
+    secondsUntilChange = 300
   ): void {
     // Level & XP Bar
     this.levelBadgeEl.textContent = `LVL ${this.player.level}`;

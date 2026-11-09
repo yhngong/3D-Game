@@ -34,8 +34,8 @@ class AethelgardGame {
   private miningVoxelKey = '';
   private miningProgress = 0;
   private hitSoundCooldown = 0;
-  private timeOfDay = 0.08; // 0..0.5 = Day (180s), 0.5..1.0 = Night (60s)
-  private readonly dayDurationSec = 180;
+  private timeOfDay = 0.02; // 0..0.5 = Day (300s / 5m), 0.5..1.0 = Night (60s / 1m)
+  private readonly dayDurationSec = 300;
   private readonly nightDurationSec = 60;
   private wasNightTime = false;
 
@@ -493,7 +493,7 @@ class AethelgardGame {
   }
 
   private updateAtmosphere(dt: number): { isNightTime: boolean; secondsRemaining: number } {
-    // Longer Days (180s) & Short Nights (60s)
+    // 5-Minute Days (300s) & 1-Minute Nights (60s)
     const currentlyNight = this.timeOfDay >= 0.5;
     const rate = currentlyNight ? 0.5 / this.nightDurationSec : 0.5 / this.dayDurationSec;
     this.timeOfDay = (this.timeOfDay + dt * rate) % 1.0;
