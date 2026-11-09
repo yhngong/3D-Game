@@ -47,6 +47,7 @@ export class HudAndMenuManager {
   private bossBarContainer!: HTMLElement;
   private bossNameEl!: HTMLElement;
   private bossPhaseEl!: HTMLElement;
+  private bossMechanicEl!: HTMLElement;
   private bossHpFillEl!: HTMLElement;
   private bossHpTextEl!: HTMLElement;
 
@@ -58,10 +59,7 @@ export class HudAndMenuManager {
   private breakProgressWrap!: HTMLElement;
   private breakProgressFill!: HTMLElement;
 
-  // Weapon Power Bar (Bottom-Left + Crosshair Knife Indicator)
-  private powerFillEl!: HTMLElement;
-  private powerMultBadgeEl!: HTMLElement;
-  private powerPctTextEl!: HTMLElement;
+  // Crosshair Knife Weapon Power Bar
   private crosshairKnifeFillEl!: HTMLElement;
   private crosshairKnifeSparkEl!: HTMLElement;
 
@@ -110,10 +108,12 @@ export class HudAndMenuManager {
       <!-- Crosshair, Minecraft-style Knife Charge Indicator & Block Mining Bar -->
       <div class="crosshair-wrap">
         <div class="crosshair-plus"></div>
-        <div class="crosshair-knife-wrap" title="Weapon Attack Power">
+        <div class="crosshair-knife-wrap" title="Weapon Attack Power (<50%: 0.25x | 50-80%: 0.75x | 80-99%: 1x | 100%: 2x)">
           <span class="crosshair-knife-icon">🗡️</span>
           <div class="crosshair-knife-track">
             <div id="crosshair-knife-fill" class="crosshair-knife-fill"></div>
+            <div class="crosshair-knife-tick" style="left:50%;"></div>
+            <div class="crosshair-knife-tick" style="left:80%;"></div>
           </div>
           <span id="crosshair-knife-spark" class="crosshair-knife-spark">2x</span>
         </div>
@@ -171,6 +171,7 @@ export class HudAndMenuManager {
           <div id="boss-hp-fill" class="boss-bar-fill"></div>
           <span id="boss-hp-text" class="boss-bar-text">750 / 750</span>
         </div>
+        <div id="boss-mechanic-status" class="boss-mechanic-status"></div>
       </div>
 
       <!-- Top-Right Minimap Radar & Progression Tracker -->
@@ -202,26 +203,6 @@ export class HudAndMenuManager {
 
       <!-- Floating Damage Numbers Layer -->
       <div id="floating-layer" class="floating-layer"></div>
-
-      <!-- Bottom-Left Weapon Power Bar -->
-      <div class="hud-panel weapon-power-panel">
-        <div class="weapon-power-header">
-          <span class="weapon-power-title">🗡️ WEAPON POWER</span>
-          <span id="power-mult-badge" class="power-mult-badge max">⚡ 2.0x MAX!</span>
-        </div>
-        <div class="weapon-power-track">
-          <div id="weapon-power-fill" class="weapon-power-fill max" style="width:100%;"></div>
-          <div class="power-tick" style="left:50%;" title="50% Power (0.75x Damage)"></div>
-          <div class="power-tick" style="left:80%;" title="80% Power (1.0x Damage)"></div>
-          <span id="weapon-power-pct" class="weapon-power-pct">100%</span>
-        </div>
-        <div class="weapon-power-tiers">
-          <span>&lt;50%: <b>0.25x</b></span>
-          <span>50-80%: <b>0.75x</b></span>
-          <span>80-99%: <b>1x</b></span>
-          <span class="tier-max">100%: <b>2x DMG</b></span>
-        </div>
-      </div>
 
       <!-- Bottom Selected Item Info & 9-Slot Hotbar -->
       <div class="bottom-hud-wrap">
@@ -275,6 +256,7 @@ export class HudAndMenuManager {
     this.bossBarContainer = document.getElementById('boss-bar-container')!;
     this.bossNameEl = document.getElementById('boss-name')!;
     this.bossPhaseEl = document.getElementById('boss-phase')!;
+    this.bossMechanicEl = document.getElementById('boss-mechanic-status')!;
     this.bossHpFillEl = document.getElementById('boss-hp-fill')!;
     this.bossHpTextEl = document.getElementById('boss-hp-text')!;
 
@@ -286,9 +268,6 @@ export class HudAndMenuManager {
     this.breakProgressWrap = document.getElementById('break-progress-wrap')!;
     this.breakProgressFill = document.getElementById('break-progress-fill')!;
 
-    this.powerFillEl = document.getElementById('weapon-power-fill')!;
-    this.powerMultBadgeEl = document.getElementById('power-mult-badge')!;
-    this.powerPctTextEl = document.getElementById('weapon-power-pct')!;
     this.crosshairKnifeFillEl = document.getElementById('crosshair-knife-fill')!;
     this.crosshairKnifeSparkEl = document.getElementById('crosshair-knife-spark')!;
 
@@ -527,37 +506,26 @@ export class HudAndMenuManager {
       this.daylightBadgeEl.style.color = '#fef08a';
     }
 
-    // Weapon Power Bar (Bottom-Left & Crosshair Knife Bar)
-    const powerPct = Math.max(0, Math.min(100, Math.floor(this.player.weaponPower * 100)));
+    // Crosshair Knife Weapon Power Bar
     const powerMult = this.player.getWeaponPowerMultiplier();
-    this.powerFillEl.style.width = `${this.player.weaponPower * 100}%`;
-    this.powerPctTextEl.textContent = `${powerPct}%`;
     this.crosshairKnifeFillEl.style.width = `${this.player.weaponPower * 100}%`;
 
     if (powerMult >= 2.0) {
-      this.powerMultBadgeEl.textContent = '⚡ 2.0x MAX!';
-      this.powerMultBadgeEl.className = 'power-mult-badge max';
-      this.powerFillEl.className = 'weapon-power-fill max';
       this.crosshairKnifeFillEl.style.background = '#fde047';
-      this.crosshairKnifeSparkEl.style.opacity = '1';
+      this.crosshairKnifeSparkEl.textContent = '2x';
+      this.crosshairKnifeSparkEl.style.color = '#fde047';
     } else if (powerMult >= 1.0) {
-      this.powerMultBadgeEl.textContent = '1.0x DMG';
-      this.powerMultBadgeEl.className = 'power-mult-badge high';
-      this.powerFillEl.className = 'weapon-power-fill high';
       this.crosshairKnifeFillEl.style.background = '#38bdf8';
-      this.crosshairKnifeSparkEl.style.opacity = '0';
+      this.crosshairKnifeSparkEl.textContent = '1x';
+      this.crosshairKnifeSparkEl.style.color = '#7dd3fc';
     } else if (powerMult >= 0.75) {
-      this.powerMultBadgeEl.textContent = '0.75x DMG';
-      this.powerMultBadgeEl.className = 'power-mult-badge mid';
-      this.powerFillEl.className = 'weapon-power-fill mid';
       this.crosshairKnifeFillEl.style.background = '#f59e0b';
-      this.crosshairKnifeSparkEl.style.opacity = '0';
+      this.crosshairKnifeSparkEl.textContent = '.75x';
+      this.crosshairKnifeSparkEl.style.color = '#fcd34d';
     } else {
-      this.powerMultBadgeEl.textContent = '0.25x WEAK';
-      this.powerMultBadgeEl.className = 'power-mult-badge low';
-      this.powerFillEl.className = 'weapon-power-fill low';
       this.crosshairKnifeFillEl.style.background = '#ef4444';
-      this.crosshairKnifeSparkEl.style.opacity = '0';
+      this.crosshairKnifeSparkEl.textContent = '.25x';
+      this.crosshairKnifeSparkEl.style.color = '#fca5a5';
     }
 
     // Target Block & Mining Progress
@@ -586,6 +554,7 @@ export class HudAndMenuManager {
       this.bossHpFillEl.style.width = `${bPct}%`;
       this.bossHpFillEl.style.background = `linear-gradient(90deg, ${boss.def.accentColor}, ${boss.def.glowColor})`;
       this.bossHpTextEl.textContent = `${Math.max(0, Math.ceil(boss.hp))} / ${boss.maxHp}`;
+      this.bossMechanicEl.textContent = this.entities.getBossMechanicStatus();
     } else {
       this.bossBarContainer.style.display = 'none';
     }

@@ -35,6 +35,38 @@ export interface ActiveMonster {
   dotTickTimer: number;
 }
 
+export interface CentipedeSegment {
+  index: number; // 0 = head, 1..7 = trailing segments
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  position: THREE.Vector3;
+  yaw: number;
+  group: THREE.Group;
+  armorMat: THREE.MeshLambertMaterial;
+  weakpointMesh: THREE.Mesh;
+  leftLegs: THREE.Object3D;
+  rightLegs: THREE.Object3D;
+}
+
+export interface BossSubNode {
+  uid: number;
+  kind: 'healing_root' | 'astral_pylon';
+  hp: number;
+  maxHp: number;
+  position: THREE.Vector3;
+  orbitAngle: number;
+  group: THREE.Group;
+}
+
+export interface BossMirrorClone {
+  uid: number;
+  position: THREE.Vector3;
+  orbitAngle: number;
+  shootTimer: number;
+  group: THREE.Group;
+}
+
 export interface ActiveBoss {
   uid: number;
   def: BossDef;
@@ -59,6 +91,16 @@ export interface ActiveBoss {
   statusChillTimer: number;
   statusBurnTimer: number;
   dotTickTimer: number;
+
+  // Unique Boss Special Features
+  flightState: 'none' | 'airborne' | 'diving' | 'grounded';
+  flightTimer: number;
+  orbitAngle: number;
+  diveTarget: THREE.Vector3;
+  segments: CentipedeSegment[];
+  subNodes: BossSubNode[];
+  clones: BossMirrorClone[];
+  shieldMesh: THREE.Mesh | null;
 }
 
 interface Particle3D {
@@ -185,15 +227,62 @@ export class EntityManager {
     return mob;
   }
 
+  private cleanupActiveBoss(): void {
+    if (!this.activeBoss) return;
+    const b = this.activeBoss;
+    this.scene.remove(b.rootGroup);
+    for (const seg of b.segments) {
+      if (seg.index > 0) {
+        this.scene.remove(seg.group);
+      }
+    }
+    for (const node of b.subNodes) {
+      this.scene.remove(node.group);
+    }
+    for (const clone of b.clones) {
+      this.scene.remove(clone.group);
+    }
+    this.activeBoss = null;
+  }
+
+  public getBossMechanicStatus(): string {
+    const b = this.activeBoss;
+    if (!b) return '';
+    if (b.def.modelType === 'treant_boss') {
+      return b.subNodes.length > 0
+        ? `🌿 ${b.subNodes.length} Healing Roots Active — Smash Roots to Break 80% Shield!`
+        : '🪓 Bark Shield Down — Vulnerable!';
+    }
+    if (b.def.modelType === 'frost_boss') {
+      if (b.flightState === 'airborne') return '🐉 Airborne Sky-Flight — Raining Glacial Breath!';
+      if (b.flightState === 'diving') return '⚡ PREDATOR DIVE-BOMB INCOMING — DODGE!';
+      return '❄️ Landed on Ground — Melee Strike Window!';
+    }
+    if (b.def.modelType === 'molten_boss') {
+      const aliveSegs = b.segments.filter((s) => s.alive).length;
+      return aliveSegs > 1
+        ? `🔥 Segments: ${aliveSegs} / ${b.segments.length} — Anti-Pierce Armor! Hit Glowing Tail!`
+        : '💀 FINAL HEAD EXPOSED — Finish Ignis Rex!';
+    }
+    if (b.def.modelType === 'void_boss') {
+      return b.clones.length > 0
+        ? `👁️ ${b.clones.length} Mirror Clones Active — Strike the Real Malakor!`
+        : '🔮 Illusion Broken — Direct Hits Enabled!';
+    }
+    if (b.def.modelType === 'astral_boss') {
+      return b.subNodes.length > 0
+        ? `🛡️ ${b.subNodes.length} Starlight Shield Pylons Orbiting — Shatter Pylons First!`
+        : '✨ Astral Barrier Shattered — Vulnerable!';
+    }
+    return '';
+  }
+
   public summonBoss(bossId: string): boolean {
     const def = BOSSES[bossId];
     if (!def) return false;
 
-    // Remove existing boss if any
-    if (this.activeBoss) {
-      this.scene.remove(this.activeBoss.rootGroup);
-      this.activeBoss = null;
-    }
+    // Remove existing boss & all sub-entities cleanly
+    this.cleanupActiveBoss();
 
     const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(
       new THREE.Vector3(0, 1, 0),
@@ -201,14 +290,16 @@ export class EntityManager {
     );
     const sx = this.player.position.x + forward.x * 14;
     const sz = this.player.position.z + forward.z * 14;
-    const sy = this.world.getSurfaceHeight(Math.floor(sx), Math.floor(sz)) + 2.0;
+    const sy =
+      this.world.getSurfaceHeight(Math.floor(sx), Math.floor(sz)) +
+      (def.modelType === 'frost_boss' ? 10.5 : 2.0);
     const pos = new THREE.Vector3(sx, sy, sz);
 
     const built = this.buildBossModel(def);
     built.rootGroup.position.copy(pos);
     this.scene.add(built.rootGroup);
 
-    this.activeBoss = {
+    const boss: ActiveBoss = {
       uid: this.nextUid++,
       def,
       isBoss: true,
@@ -232,7 +323,63 @@ export class EntityManager {
       statusChillTimer: 0,
       statusBurnTimer: 0,
       dotTickTimer: 0.5,
+      flightState: def.modelType === 'frost_boss' ? 'airborne' : 'none',
+      flightTimer: def.modelType === 'frost_boss' ? 9.0 : 0,
+      orbitAngle: Math.random() * Math.PI * 2,
+      diveTarget: pos.clone(),
+      segments: [],
+      subNodes: [],
+      clones: [],
+      shieldMesh: built.shieldMesh,
     };
+
+    this.activeBoss = boss;
+
+    // Initialize Boss-specific unique mechanics!
+    if (def.modelType === 'molten_boss') {
+      // Build 8-segment Magma Centipede (0 = Head, 1..7 = Armored Body/Tail Segments)
+      const totalSegments = 8;
+      const segHp = Math.round(def.maxHp / totalSegments);
+      // Segment 0 is the Head (boss.rootGroup)
+      boss.segments.push({
+        index: 0,
+        hp: segHp,
+        maxHp: segHp,
+        alive: true,
+        position: pos.clone(),
+        yaw: 0,
+        group: built.rootGroup,
+        armorMat: built.primaryBodyMat,
+        weakpointMesh: built.headWeakpointMesh,
+        leftLegs: built.leftLeg,
+        rightLegs: built.rightLeg,
+      });
+      for (let idx = 1; idx < totalSegments; idx++) {
+        const segPos = pos.clone().add(new THREE.Vector3(0, 0, -idx * 2.2));
+        segPos.y = this.world.getSurfaceHeight(Math.floor(segPos.x), Math.floor(segPos.z)) + 1.0;
+        const segBuilt = this.buildCentipedeSegmentMesh(def, idx === totalSegments - 1);
+        segBuilt.group.position.copy(segPos);
+        this.scene.add(segBuilt.group);
+        boss.segments.push({
+          index: idx,
+          hp: segHp,
+          maxHp: segHp,
+          alive: true,
+          position: segPos,
+          yaw: 0,
+          group: segBuilt.group,
+          armorMat: segBuilt.armorMat,
+          weakpointMesh: segBuilt.weakpointMesh,
+          leftLegs: segBuilt.leftLegs,
+          rightLegs: segBuilt.rightLegs,
+        });
+      }
+      this.refreshCentipedeWeakpoint(boss);
+    } else if (def.modelType === 'astral_boss') {
+      this.spawnAstralShieldPylons(boss, 3);
+    } else if (def.modelType === 'treant_boss') {
+      this.spawnTreantHealingRoots(boss, 3);
+    }
 
     sound.playBossRoar();
     this.spawnShockwave(pos, 12, def.glowColor);
@@ -450,6 +597,8 @@ export class EntityManager {
     const b = this.activeBoss;
     if (!b) return;
 
+    const nowSec = performance.now() * 0.001;
+
     // Status DoT ticks
     b.statusPoisonTimer = Math.max(0, b.statusPoisonTimer - dt);
     b.statusChillTimer = Math.max(0, b.statusChillTimer - dt);
@@ -470,10 +619,18 @@ export class EntityManager {
           b.phaseIndex = pIdx;
           sound.playBossRoar();
           this.spawnShockwave(b.position, 15, b.def.glowColor);
+          // Trigger phase-transition special boss mechanics!
+          if (b.def.modelType === 'astral_boss') {
+            this.spawnAstralShieldPylons(b, 3 + (pIdx >= 2 ? 1 : 0));
+          } else if (b.def.modelType === 'treant_boss') {
+            this.spawnTreantHealingRoots(b, 3);
+          } else if (b.def.modelType === 'void_boss') {
+            this.spawnMalakorMirrorClones(b, 3);
+          }
           if (this.onBannerNotification) {
             this.onBannerNotification(
               `${b.def.name}: ${b.def.phases[pIdx].name}`,
-              'Boss power intensifies!',
+              this.getBossMechanicStatus() || 'Boss power intensifies!',
               b.def.glowColor
             );
           }
@@ -488,27 +645,240 @@ export class EntityManager {
     const dz = this.player.position.z - b.position.z;
     const dist = Math.hypot(dx, dz);
 
-    if (dist > 0.1) {
-      b.yaw = Math.atan2(dx, dz);
-      const desiredDist = 2.6;
-      if (dist > desiredDist) {
-        const spd = b.def.speed * phase.speedMult * chillMult;
-        b.velocity.x = (dx / dist) * spd;
-        b.velocity.z = (dz / dist) * spd;
-      } else {
-        b.velocity.x *= 0.82;
-        b.velocity.z *= 0.82;
-      }
+    // Toggle protective barrier visual for Treant (Roots) & Aethelgard (Pylons)
+    if (b.shieldMesh) {
+      b.shieldMesh.visible = b.subNodes.length > 0;
+      b.shieldMesh.rotation.y += dt * 1.6;
     }
 
-    const isFloatingBoss = b.def.modelType === 'void_boss' || b.def.modelType === 'astral_boss';
-    if (isFloatingBoss) {
+    // =====================================================
+    // UNIQUE MOVEMENT & SPECIAL MECHANICS PER BOSS TYPE
+    // =====================================================
+    if (b.def.modelType === 'frost_boss') {
+      // CRYONAX: True Flying Frost Dragon (Airborne Sky-Circles -> Dive-Bomb -> Grounded Window)
+      b.flightTimer -= dt;
+      if (b.flightState === 'airborne') {
+        b.orbitAngle += dt * 0.78 * phase.speedMult * chillMult;
+        const orbitRadius = 12.5;
+        const targetX = this.player.position.x + Math.cos(b.orbitAngle) * orbitRadius;
+        const targetZ = this.player.position.z + Math.sin(b.orbitAngle) * orbitRadius;
+        const surfY = this.world.getSurfaceHeight(Math.floor(targetX), Math.floor(targetZ));
+        const targetY = Math.max(this.player.position.y + 8.5, surfY + 9.5) + Math.sin(nowSec * 2.6) * 1.1;
+
+        const moveX = targetX - b.position.x;
+        const moveZ = targetZ - b.position.z;
+        b.position.x += moveX * Math.min(1, 3.2 * dt);
+        b.position.z += moveZ * Math.min(1, 3.2 * dt);
+        b.position.y += (targetY - b.position.y) * Math.min(1, 4.0 * dt);
+        b.yaw = Math.atan2(dx, dz);
+
+        // Giant crystal dragon wing flap
+        const flap = Math.sin(nowSec * 7.5) * 0.62;
+        b.leftArm.rotation.z = flap;
+        b.rightArm.rotation.z = -flap;
+        b.rootGroup.rotation.x = 0.12;
+
+        if (b.flightTimer <= 0) {
+          b.flightState = 'diving';
+          b.flightTimer = 1.7;
+          const diveSurf = this.world.getSurfaceHeight(
+            Math.floor(this.player.position.x),
+            Math.floor(this.player.position.z)
+          );
+          b.diveTarget.set(this.player.position.x, diveSurf + 1.2, this.player.position.z);
+          sound.playBossRoar();
+          if (this.onBannerNotification) {
+            this.onBannerNotification('🐉 CRYONAX DIVE-BOMBS!', 'Use [Q] Dash to evade the aerial slam!', '#38bdf8');
+          }
+        }
+      } else if (b.flightState === 'diving') {
+        const toDive = b.diveTarget.clone().sub(b.position);
+        const diveDist = toDive.length();
+        const diveSpd = 27 * chillMult;
+        if (diveDist > 1.8 && b.flightTimer > 0) {
+          toDive.normalize();
+          b.position.addScaledVector(toDive, diveSpd * dt);
+          b.yaw = Math.atan2(toDive.x, toDive.z);
+          b.rootGroup.rotation.x = 0.55;
+          b.leftArm.rotation.z = -0.55;
+          b.rightArm.rotation.z = 0.55;
+        } else {
+          // Impact slam!
+          b.flightState = 'grounded';
+          b.flightTimer = 6.2;
+          b.rootGroup.rotation.x = 0;
+          this.spawnShockwave(b.position, 11.0, '#38bdf8');
+          this.spawnParticles(b.position.clone().add(new THREE.Vector3(0, 1.5, 0)), '#e0f2fe', 34, 8);
+          sound.playExplosion();
+          if (this.player.position.distanceTo(b.position) <= 9.5) {
+            this.player.takeDamage(Math.round(b.def.damage * 1.25));
+            this.player.velocity.y = 9.0;
+          }
+        }
+      } else {
+        // Grounded Dragon phase (melee punish window!)
+        b.rootGroup.rotation.x = 0;
+        if (dist > 0.1) {
+          b.yaw = Math.atan2(dx, dz);
+          const spd = b.def.speed * phase.speedMult * chillMult * 0.85;
+          b.velocity.x = dist > 3.0 ? (dx / dist) * spd : b.velocity.x * 0.8;
+          b.velocity.z = dist > 3.0 ? (dz / dist) * spd : b.velocity.z * 0.8;
+        }
+        b.onGround = this.moveEntityWithAutoJump(b.position, b.velocity, b.onGround, 1.6, 4.2, dt);
+        const groundFlap = Math.sin(nowSec * 3.5) * 0.2;
+        b.leftArm.rotation.z = groundFlap;
+        b.rightArm.rotation.z = -groundFlap;
+
+        if (b.flightTimer <= 0) {
+          b.flightState = 'airborne';
+          b.flightTimer = 8.5;
+          b.velocity.y = 14;
+          sound.playBossRoar();
+          this.spawnShockwave(b.position, 8.0, '#38bdf8');
+        }
+      }
+    } else if (b.def.modelType === 'molten_boss') {
+      // IGNIS REX: 8-Segment Slithering Magma Centipede
+      const aliveCount = b.segments.filter((s) => s.alive).length;
+      const lostSegBoost = 1 + (b.segments.length - aliveCount) * 0.1;
+      const baseAngle = Math.atan2(dx, dz);
+      // Serpentine S-curve weave so its multi-segment body coils across the terrain
+      const weave = dist > 4.5 ? Math.sin(nowSec * 3.6) * 0.58 : Math.sin(nowSec * 4.5) * 0.25;
+      b.yaw = baseAngle + weave;
+      const spd = b.def.speed * phase.speedMult * lostSegBoost * chillMult;
+      b.velocity.x = Math.sin(b.yaw) * spd;
+      b.velocity.z = Math.cos(b.yaw) * spd;
+
+      b.onGround = this.moveEntityWithAutoJump(b.position, b.velocity, b.onGround, 1.35, 3.2, dt);
+
+      // Update Head (segment 0) & follow-the-leader chain for segments 1..7
+      if (b.segments.length > 0) {
+        b.segments[0].position.copy(b.position);
+        b.segments[0].yaw = b.yaw;
+        let prevPos = b.position;
+        const segSpacing = 2.15;
+
+        for (let sIdx = 1; sIdx < b.segments.length; sIdx++) {
+          const seg = b.segments[sIdx];
+          if (!seg.alive) continue;
+          const diffX = seg.position.x - prevPos.x;
+          const diffZ = seg.position.z - prevPos.z;
+          const segDist = Math.hypot(diffX, diffZ) || 0.001;
+          seg.position.x = prevPos.x + (diffX / segDist) * segSpacing;
+          seg.position.z = prevPos.z + (diffZ / segDist) * segSpacing;
+          const targetGroundY =
+            this.world.getSurfaceHeight(Math.floor(seg.position.x), Math.floor(seg.position.z)) + 1.05;
+          seg.position.y += (targetGroundY - seg.position.y) * Math.min(1, 12 * dt);
+          seg.yaw = Math.atan2(prevPos.x - seg.position.x, prevPos.z - seg.position.z);
+
+          seg.group.position.copy(seg.position);
+          seg.group.rotation.y = seg.yaw;
+
+          // Chittering centipede magma legs
+          const legWave = Math.sin(nowSec * 14 + sIdx * 1.1) * 0.45;
+          seg.leftLegs.rotation.z = legWave;
+          seg.rightLegs.rotation.z = -legWave;
+          seg.weakpointMesh.rotation.y += dt * 4.5;
+          const pulse = 1.0 + Math.sin(nowSec * 9) * 0.18;
+          seg.weakpointMesh.scale.setScalar(pulse);
+
+          // Segment contact damage
+          if (this.player.position.distanceTo(seg.position) < 2.35) {
+            this.player.takeDamage(Math.round(b.def.damage * 0.75));
+          }
+          prevPos = seg.position;
+        }
+      }
+      // Snapping mandibles on centipede head
+      const snap = Math.sin(nowSec * 10) * 0.35;
+      b.leftArm.rotation.y = snap;
+      b.rightArm.rotation.y = -snap;
+    } else if (b.def.modelType === 'void_boss' || b.def.modelType === 'astral_boss') {
+      // MALAKOR (Void Illusionist) & AETHELGARD (Six-Winged Astral Seraph)
+      if (dist > 0.1) {
+        b.yaw = Math.atan2(dx, dz);
+        const desiredDist = b.def.modelType === 'astral_boss' ? 4.2 : 3.2;
+        if (dist > desiredDist) {
+          const spd = b.def.speed * phase.speedMult * chillMult;
+          b.velocity.x = (dx / dist) * spd;
+          b.velocity.z = (dz / dist) * spd;
+        } else {
+          b.velocity.x *= 0.82;
+          b.velocity.z *= 0.82;
+        }
+      }
       b.position.x += b.velocity.x * dt;
       b.position.z += b.velocity.z * dt;
       const groundY = this.world.getSurfaceHeight(Math.floor(b.position.x), Math.floor(b.position.z)) + 1;
-      const floatOffset = 2.2 + Math.sin(performance.now() * 0.003) * 0.6;
+      const floatOffset = (b.def.modelType === 'astral_boss' ? 2.9 : 2.2) + Math.sin(nowSec * 3.0) * 0.65;
       b.position.y += (groundY + floatOffset - b.position.y) * Math.min(1, 8 * dt);
+
+      // Update Malakor's Mirror Clones
+      if (b.clones.length > 0) {
+        for (const clone of b.clones) {
+          clone.orbitAngle += dt * 0.95;
+          const cx = this.player.position.x + Math.cos(clone.orbitAngle) * 9.5;
+          const cz = this.player.position.z + Math.sin(clone.orbitAngle) * 9.5;
+          const cy = this.world.getSurfaceHeight(Math.floor(cx), Math.floor(cz)) + 3.0 + Math.sin(nowSec * 3 + clone.uid) * 0.5;
+          clone.position.lerp(new THREE.Vector3(cx, cy, cz), Math.min(1, 6 * dt));
+          clone.group.position.copy(clone.position);
+          clone.group.rotation.y = Math.atan2(
+            this.player.position.x - clone.position.x,
+            this.player.position.z - clone.position.z
+          );
+          clone.shootTimer -= dt;
+          if (clone.shootTimer <= 0) {
+            clone.shootTimer = 2.3;
+            const shotOrigin = clone.position.clone().add(new THREE.Vector3(0, 1.8, 0));
+            const shotDir = this.player.position
+              .clone()
+              .add(new THREE.Vector3(0, 1.0, 0))
+              .sub(shotOrigin)
+              .normalize();
+            this.spawnProjectile({
+              position: shotOrigin,
+              velocity: shotDir.multiplyScalar(19),
+              fromPlayer: false,
+              damage: Math.round(b.def.damage * 0.45),
+              radius: 0.34,
+              color: '#c084fc',
+              maxLife: 3.0,
+              gravity: 0,
+            });
+          }
+        }
+      }
+
+      // Update Aethelgard's Orbiting 3D Starlight Shield Pylons
+      if (b.def.modelType === 'astral_boss' && b.subNodes.length > 0) {
+        for (const node of b.subNodes) {
+          node.orbitAngle += dt * (1.25 + b.phaseIndex * 0.25);
+          const r = 6.2;
+          node.position.set(
+            b.position.x + Math.cos(node.orbitAngle) * r,
+            b.position.y + 2.2 + Math.sin(nowSec * 4 + node.uid) * 0.55,
+            b.position.z + Math.sin(node.orbitAngle) * r
+          );
+          node.group.position.copy(node.position);
+          node.group.rotation.y += dt * 3.0;
+          if (Math.random() < dt * 4) {
+            this.spawnParticles(node.position, '#fde047', 1, 1.5);
+          }
+        }
+      }
     } else {
+      // SYLVAN BEHEMOTH (Root-Tether Treant)
+      if (dist > 0.1) {
+        b.yaw = Math.atan2(dx, dz);
+        if (dist > 2.8) {
+          const spd = b.def.speed * phase.speedMult * chillMult;
+          b.velocity.x = (dx / dist) * spd;
+          b.velocity.z = (dz / dist) * spd;
+        } else {
+          b.velocity.x *= 0.82;
+          b.velocity.z *= 0.82;
+        }
+      }
       b.onGround = this.moveEntityWithAutoJump(
         b.position,
         b.velocity,
@@ -517,31 +887,43 @@ export class EntityManager {
         2.6 * b.def.scale,
         dt
       );
+
+      // Living Heart-Roots heal Sylvan Behemoth & pulse emerald particles!
+      if (b.subNodes.length > 0) {
+        b.hp = Math.min(b.maxHp, b.hp + b.subNodes.length * 16 * dt);
+        for (const root of b.subNodes) {
+          root.group.rotation.y += dt * 2.0;
+          if (Math.random() < dt * 3.5) {
+            this.spawnParticles(root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), '#4ade80', 2, 2.5);
+          }
+        }
+      }
+
+      // Treant walk limb animation
+      const walkCycle = nowSec * 8 * b.def.speed;
+      const isMoving = Math.hypot(b.velocity.x, b.velocity.z) > 0.35;
+      const legSwing = isMoving ? Math.sin(walkCycle) * 0.45 : 0;
+      b.leftLeg.rotation.x = legSwing;
+      b.rightLeg.rotation.x = -legSwing;
+      b.leftArm.rotation.x += (-legSwing * 0.45 - b.leftArm.rotation.x) * Math.min(1, 8 * dt);
+      b.rightArm.rotation.x += (legSwing * 0.45 - b.rightArm.rotation.x) * Math.min(1, 8 * dt);
     }
 
     b.rootGroup.position.copy(b.position);
     b.rootGroup.rotation.y = b.yaw;
 
-    // Boss walk limb animation
-    const walkCycle = performance.now() * 0.008 * b.def.speed;
-    const isMoving = Math.hypot(b.velocity.x, b.velocity.z) > 0.35;
-    const legSwing = isMoving ? Math.sin(walkCycle) * 0.5 : 0;
-    b.leftLeg.rotation.x = legSwing;
-    b.rightLeg.rotation.x = -legSwing;
-    b.leftArm.rotation.x += (-legSwing * 0.45 - b.leftArm.rotation.x) * Math.min(1, 8 * dt);
-    b.rightArm.rotation.x += (legSwing * 0.45 - b.rightArm.rotation.x) * Math.min(1, 8 * dt);
-
     // Rotate boss halo rings if present
     if (b.haloRing1) {
-      b.haloRing1.rotation.z += dt * 1.4;
-      b.haloRing1.rotation.x += dt * 0.7;
+      b.haloRing1.rotation.z += dt * 1.6;
+      b.haloRing1.rotation.x += dt * 0.9;
     }
     if (b.haloRing2) {
-      b.haloRing2.rotation.y -= dt * 1.8;
+      b.haloRing2.rotation.y -= dt * 2.1;
+      b.haloRing2.rotation.z -= dt * 0.8;
     }
 
     // Contact melee damage if very close
-    if (dist < 3.8 && Math.abs(this.player.position.y - b.position.y) < 4.5) {
+    if (dist < 3.6 && Math.abs(this.player.position.y - b.position.y) < 4.2) {
       this.player.takeDamage(Math.round(b.def.damage * 0.85));
     }
 
@@ -841,6 +1223,295 @@ export class EntityManager {
         }
         break;
       }
+
+      case 'plant_healing_roots': {
+        if (b.subNodes.length === 0) {
+          this.spawnTreantHealingRoots(b, 3);
+          if (this.onBannerNotification) {
+            this.onBannerNotification(
+              '🌿 LIVING HEART-ROOTS SPROUTED!',
+              'Destroy the glowing emerald roots to break Sylvan Behemoth’s 80% Bark Shield!',
+              '#4ade80'
+            );
+          }
+        } else {
+          this.spawnShockwave(b.position, 9.5, '#10b981');
+          if (this.player.position.distanceTo(b.position) <= 9.5) {
+            this.player.takeDamage(b.def.damage);
+          }
+        }
+        break;
+      }
+
+      case 'mirror_clones': {
+        if (b.clones.length === 0) {
+          this.spawnMalakorMirrorClones(b, 3);
+          if (this.onBannerNotification) {
+            this.onBannerNotification(
+              '👁️ MALAKOR SPLITS INTO MIRROR CLONES!',
+              'Fake illusions shatter in 1 hit — strike the TRUE Malakor to dispel them!',
+              '#c084fc'
+            );
+          }
+        } else {
+          this.executeBossAttack(b, 'void_lance_barrage');
+        }
+        break;
+      }
+
+      case 'antigrav_pulse': {
+        this.spawnShockwave(this.player.position, 12.0, '#38bdf8');
+        this.spawnParticles(this.player.position.clone().add(new THREE.Vector3(0, 1, 0)), '#fde047', 28, 7);
+        sound.playMagicCast(1.5);
+        this.player.velocity.y = 14.5;
+        this.player.onGround = false;
+        for (let i = 0; i < 7; i++) {
+          const offsetAngle = (i - 3) * 0.14;
+          const dir = toPlayer.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), offsetAngle);
+          this.spawnProjectile({
+            position: center.clone(),
+            velocity: dir.multiplyScalar(25),
+            fromPlayer: false,
+            damage: b.def.damage,
+            radius: 0.42,
+            color: '#38bdf8',
+            maxLife: 3.4,
+            gravity: 0,
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  private spawnTreantHealingRoots(b: ActiveBoss, count: number): void {
+    for (const n of b.subNodes) this.scene.remove(n.group);
+    b.subNodes.length = 0;
+
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.4;
+      const rx = b.position.x + Math.cos(angle) * 7.5;
+      const rz = b.position.z + Math.sin(angle) * 7.5;
+      const ry = this.world.getSurfaceHeight(Math.floor(rx), Math.floor(rz)) + 1.0;
+      const pos = new THREE.Vector3(rx, ry, rz);
+
+      const group = new THREE.Group();
+      const barkMat = new THREE.MeshLambertMaterial({ color: '#3f2e1e' });
+      const gemMat = new THREE.MeshBasicMaterial({ color: '#4ade80' });
+      const base = new THREE.Mesh(new THREE.ConeGeometry(0.85, 1.5, 5), barkMat);
+      base.position.y = 0.75;
+      const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.62, 0), gemMat);
+      crystal.position.y = 1.85;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.08, 6, 16), gemMat);
+      ring.position.y = 1.85;
+      ring.rotation.x = Math.PI / 2;
+      group.add(base, crystal, ring);
+      group.position.copy(pos);
+      this.scene.add(group);
+
+      b.subNodes.push({
+        uid: this.nextUid++,
+        kind: 'healing_root',
+        hp: 140,
+        maxHp: 140,
+        position: pos,
+        orbitAngle: angle,
+        group,
+      });
+      this.spawnParticles(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), '#4ade80', 16, 4);
+    }
+    sound.playMagicCast(0.6);
+  }
+
+  private spawnAstralShieldPylons(b: ActiveBoss, count: number): void {
+    for (const n of b.subNodes) this.scene.remove(n.group);
+    b.subNodes.length = 0;
+
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const pos = b.position.clone().add(new THREE.Vector3(Math.cos(angle) * 6.2, 2.2, Math.sin(angle) * 6.2));
+
+      const group = new THREE.Group();
+      const goldMat = new THREE.MeshLambertMaterial({
+        color: '#fde047',
+        emissive: '#f59e0b',
+        emissiveIntensity: 0.5,
+      });
+      const cyanMat = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
+      const obelisk = new THREE.Mesh(new THREE.OctahedronGeometry(0.85, 0), cyanMat);
+      obelisk.scale.set(0.8, 1.7, 0.8);
+      const cage = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.09, 6, 16), goldMat);
+      group.add(obelisk, cage);
+      group.position.copy(pos);
+      this.scene.add(group);
+
+      b.subNodes.push({
+        uid: this.nextUid++,
+        kind: 'astral_pylon',
+        hp: 620,
+        maxHp: 620,
+        position: pos,
+        orbitAngle: angle,
+        group,
+      });
+      this.spawnParticles(pos, '#fde047', 18, 5);
+    }
+    sound.playMagicCast(1.4);
+  }
+
+  private spawnMalakorMirrorClones(b: ActiveBoss, cloneCount: number): void {
+    for (const c of b.clones) this.scene.remove(c.group);
+    b.clones.length = 0;
+
+    const totalSpots = cloneCount + 1;
+    const realSpot = Math.floor(Math.random() * totalSpots);
+    const baseAngle = Math.random() * Math.PI * 2;
+
+    for (let i = 0; i < totalSpots; i++) {
+      const angle = baseAngle + (i / totalSpots) * Math.PI * 2;
+      const px = this.player.position.x + Math.cos(angle) * 9.5;
+      const pz = this.player.position.z + Math.sin(angle) * 9.5;
+      const py = this.world.getSurfaceHeight(Math.floor(px), Math.floor(pz)) + 3.0;
+      const spotPos = new THREE.Vector3(px, py, pz);
+      this.spawnParticles(spotPos, '#c084fc', 20, 5);
+
+      if (i === realSpot) {
+        b.position.copy(spotPos);
+      } else {
+        const cloneModel = this.buildBossModel(b.def);
+        cloneModel.rootGroup.position.copy(spotPos);
+        this.scene.add(cloneModel.rootGroup);
+        b.clones.push({
+          uid: this.nextUid++,
+          position: spotPos,
+          orbitAngle: angle,
+          shootTimer: 1.0 + i * 0.55,
+          group: cloneModel.rootGroup,
+        });
+      }
+    }
+    sound.playMagicCast(0.8);
+  }
+
+  private getVulnerableCentipedeSegment(b: ActiveBoss): CentipedeSegment | null {
+    for (let idx = b.segments.length - 1; idx >= 0; idx--) {
+      if (b.segments[idx].alive) return b.segments[idx];
+    }
+    return null;
+  }
+
+  private refreshCentipedeWeakpoint(b: ActiveBoss): void {
+    const vuln = this.getVulnerableCentipedeSegment(b);
+    for (const seg of b.segments) {
+      if (!seg.alive) continue;
+      const isVuln = vuln !== null && seg.index === vuln.index;
+      seg.weakpointMesh.visible = isVuln;
+      if (isVuln) {
+        seg.armorMat.color.set('#ea580c');
+        seg.armorMat.emissive.set('#f97316');
+        seg.armorMat.emissiveIntensity = 0.55;
+      } else {
+        seg.armorMat.color.set('#290f02');
+        seg.armorMat.emissive.set('#451a03');
+        seg.armorMat.emissiveIntensity = 0.15;
+      }
+    }
+  }
+
+  private damageCentipedeSegment(
+    b: ActiveBoss,
+    hitSeg: CentipedeSegment,
+    amount: number,
+    color: string,
+    isCrit: boolean
+  ): void {
+    const vuln = this.getVulnerableCentipedeSegment(b);
+    if (!vuln) return;
+
+    if (hitSeg.index !== vuln.index) {
+      // Impervious obsidian carapace on non-vulnerable segments!
+      sound.playBlockHit(1.5);
+      this.spawnParticles(hitSeg.position.clone().add(new THREE.Vector3(0, 1.2, 0)), '#94a3b8', 8, 4);
+      if (this.onDamageNumber) {
+        this.onDamageNumber(hitSeg.position.clone().add(new THREE.Vector3(0, 2.2, 0)), 1, '#94a3b8', false);
+      }
+      return;
+    }
+
+    // Full damage to the single exposed tail/head segment (excess damage NEVER spills into next segment!)
+    vuln.hp = Math.max(0, vuln.hp - amount);
+    sound.playMonsterHit();
+    if (this.onDamageNumber) {
+      this.onDamageNumber(vuln.position.clone().add(new THREE.Vector3(0, 2.4, 0)), amount, color, isCrit);
+    }
+    this.spawnParticles(vuln.position.clone().add(new THREE.Vector3(0, 1.3, 0)), '#fef08a', 10, 4.5);
+
+    if (vuln.hp <= 0) {
+      if (vuln.index > 0) {
+        vuln.alive = false;
+        this.scene.remove(vuln.group);
+        sound.playExplosion();
+        this.spawnShockwave(vuln.position, 6.5, '#f97316');
+        this.spawnParticles(vuln.position.clone().add(new THREE.Vector3(0, 1.2, 0)), '#fb923c', 32, 7);
+        for (let f = 0; f < 5; f++) {
+          const a = (f / 5) * Math.PI * 2;
+          this.spawnProjectile({
+            position: vuln.position.clone().add(new THREE.Vector3(0, 1.5, 0)),
+            velocity: new THREE.Vector3(Math.cos(a) * 14, 5, Math.sin(a) * 14),
+            fromPlayer: false,
+            damage: Math.round(b.def.damage * 0.8),
+            radius: 0.36,
+            color: '#f97316',
+            maxLife: 2.5,
+            gravity: 6.0,
+            explosiveRadius: 2.4,
+          });
+        }
+        this.refreshCentipedeWeakpoint(b);
+        const remaining = b.segments.filter((s) => s.alive).length;
+        b.hp = b.segments.reduce((sum, s) => sum + (s.alive ? s.hp : 0), 0);
+        if (this.onBannerNotification) {
+          this.onBannerNotification(
+            `🔥 SEGMENT SEVERED! (${remaining} / ${b.segments.length} LEFT)`,
+            remaining === 1
+              ? 'Only Ignis Rex’s Armored Head remains — finish it!'
+              : 'Next tail segment exposed! Keep striking the glowing segment!',
+            '#f97316'
+          );
+        }
+        return;
+      } else {
+        b.hp = 0;
+        this.handleBossDeath(b);
+        return;
+      }
+    }
+
+    b.hp = b.segments.reduce((sum, s) => sum + (s.alive ? s.hp : 0), 0);
+  }
+
+  private damageBossSubNode(b: ActiveBoss, nodeIdx: number, amount: number, isCrit: boolean): void {
+    const node = b.subNodes[nodeIdx];
+    if (!node) return;
+    node.hp -= amount;
+    sound.playMonsterHit();
+    if (this.onDamageNumber) {
+      this.onDamageNumber(node.position.clone().add(new THREE.Vector3(0, 1.8, 0)), amount, '#fde047', isCrit);
+    }
+    this.spawnParticles(node.position.clone().add(new THREE.Vector3(0, 1.0, 0)), b.def.glowColor, 10, 4);
+
+    if (node.hp <= 0) {
+      this.scene.remove(node.group);
+      b.subNodes.splice(nodeIdx, 1);
+      sound.playExplosion();
+      this.spawnShockwave(node.position, 5.5, b.def.glowColor);
+      if (b.subNodes.length === 0 && this.onBannerNotification) {
+        this.onBannerNotification(
+          b.def.modelType === 'astral_boss' ? '✨ ASTRAL SHIELD SHATTERED!' : '🌿 BARK SHIELD BROKEN!',
+          `${b.def.name} is now exposed to 100% full damage!`,
+          b.def.glowColor
+        );
+      }
     }
   }
 
@@ -905,18 +1576,78 @@ export class EntityManager {
       }
     }
 
-    // Check hit against Active Boss
+    // Check hit against Active Boss & Boss Special Sub-Entities (Roots, Pylons, Clones, Centipede Segments!)
     if (this.activeBoss) {
-      const bossCenter = this.activeBoss.position.clone().add(new THREE.Vector3(0, 2.0, 0));
+      const b = this.activeBoss;
+      const isCrit = powerMult >= 0.8 && Math.random() < (item.critChance || 0.1);
+      const dmg = Math.max(1, Math.round(baseDmg * (isCrit ? 1.5 : 1.0)));
+
+      // 1. Check Boss Sub-Nodes (Treant Healing Roots / Aethelgard Shield Pylons)
+      for (let nIdx = b.subNodes.length - 1; nIdx >= 0; nIdx--) {
+        const node = b.subNodes[nIdx];
+        const nodeCenter = node.position.clone().add(new THREE.Vector3(0, 1.0, 0));
+        const toNode = nodeCenter.clone().sub(camPos);
+        const nDist = toNode.length();
+        if (nDist <= reach + 1.8 && (toNode.normalize().dot(camDir) > 0.35 || nDist < 2.8)) {
+          this.damageBossSubNode(b, nIdx, dmg, isCrit || isMaxPower);
+          return;
+        }
+      }
+
+      // 2. Check Malakor's Mirror Clones (1 hit shatters a fake clone!)
+      for (let cIdx = b.clones.length - 1; cIdx >= 0; cIdx--) {
+        const clone = b.clones[cIdx];
+        const cloneCenter = clone.position.clone().add(new THREE.Vector3(0, 1.8, 0));
+        const toClone = cloneCenter.clone().sub(camPos);
+        const cDist = toClone.length();
+        if (cDist <= reach + 2.2 && (toClone.normalize().dot(camDir) > 0.35 || cDist < 3.2)) {
+          sound.playMagicCast(0.5);
+          this.spawnParticles(cloneCenter, '#c084fc', 28, 6);
+          if (this.onDamageNumber) {
+            this.onDamageNumber(cloneCenter, 0, '#c084fc', false);
+          }
+          this.scene.remove(clone.group);
+          b.clones.splice(cIdx, 1);
+          return;
+        }
+      }
+
+      // 3. Check Ignis Rex's 8 Centipede Segments (prioritize vulnerable tail segment if in swing cone!)
+      if (b.def.modelType === 'molten_boss' && b.segments.length > 0) {
+        const vuln = this.getVulnerableCentipedeSegment(b);
+        if (vuln) {
+          const vCenter = vuln.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+          const toVuln = vCenter.clone().sub(camPos);
+          const vDist = toVuln.length();
+          if (vDist <= reach + 2.4 && (toVuln.normalize().dot(camDir) > 0.3 || vDist < 3.4)) {
+            if (powerMult >= 0.5) this.applyStatusToEntity(b, item.statusEffect);
+            this.damageCentipedeSegment(b, vuln, dmg, isCrit || isMaxPower ? '#fde047' : dmgColor, isCrit || isMaxPower);
+            return;
+          }
+        }
+        // Otherwise check if swinging at an armored middle/head segment
+        for (const seg of b.segments) {
+          if (!seg.alive) continue;
+          const sCenter = seg.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+          const toSeg = sCenter.clone().sub(camPos);
+          const sDist = toSeg.length();
+          if (sDist <= reach + 2.2 && (toSeg.normalize().dot(camDir) > 0.35 || sDist < 3.2)) {
+            this.damageCentipedeSegment(b, seg, dmg, dmgColor, false);
+            return;
+          }
+        }
+        return;
+      }
+
+      // 4. Standard Boss Body Hit
+      const bossCenter = b.position.clone().add(new THREE.Vector3(0, 2.0, 0));
       const toBoss = bossCenter.clone().sub(camPos);
       const dist = toBoss.length();
-      if (dist <= reach + 2.4) {
+      if (dist <= reach + 2.6) {
         const dot = toBoss.normalize().dot(camDir);
-        if (dot > 0.35 || dist < 3.5) {
-          const isCrit = powerMult >= 0.8 && Math.random() < (item.critChance || 0.1);
-          const dmg = Math.max(1, Math.round(baseDmg * (isCrit ? 1.5 : 1.0)));
+        if (dot > 0.35 || dist < 3.6) {
           if (powerMult >= 0.5) {
-            this.applyStatusToEntity(this.activeBoss, item.statusEffect);
+            this.applyStatusToEntity(b, item.statusEffect);
           }
           this.damageBoss(dmg, isCrit || isMaxPower ? '#fde047' : dmgColor, isCrit || isMaxPower);
         }
@@ -1116,9 +1847,32 @@ export class EntityManager {
         this.damageMonster(m, damage, '#fde047', true);
       }
     }
-    if (this.activeBoss && this.activeBoss.position.distanceTo(center) <= radius + 2.0) {
-      this.applyStatusToEntity(this.activeBoss, effect);
-      this.damageBoss(damage, '#fde047', true);
+    if (this.activeBoss) {
+      const b = this.activeBoss;
+      for (let nIdx = b.subNodes.length - 1; nIdx >= 0; nIdx--) {
+        if (b.subNodes[nIdx].position.distanceTo(center) <= radius + 1.5) {
+          this.damageBossSubNode(b, nIdx, damage, true);
+        }
+      }
+      for (let cIdx = b.clones.length - 1; cIdx >= 0; cIdx--) {
+        if (b.clones[cIdx].position.distanceTo(center) <= radius + 1.5) {
+          this.spawnParticles(b.clones[cIdx].position.clone().add(new THREE.Vector3(0, 1.5, 0)), '#c084fc', 22, 5);
+          this.scene.remove(b.clones[cIdx].group);
+          b.clones.splice(cIdx, 1);
+        }
+      }
+      if (b.def.modelType === 'molten_boss' && b.segments.length > 0) {
+        const vuln = this.getVulnerableCentipedeSegment(b);
+        if (vuln && vuln.position.distanceTo(center) <= radius + 2.2) {
+          this.applyStatusToEntity(b, effect);
+          this.damageCentipedeSegment(b, vuln, damage, '#fde047', true);
+        }
+        return;
+      }
+      if (b.position.distanceTo(center) <= radius + 2.2) {
+        this.applyStatusToEntity(b, effect);
+        this.damageBoss(damage, '#fde047', true);
+      }
     }
   }
 
@@ -1170,14 +1924,54 @@ export class EntityManager {
   public damageBoss(amount: number, color = '#ffffff', isCrit = false, silent = false): void {
     const b = this.activeBoss;
     if (!b) return;
-    b.hp -= amount;
+
+    // Route DoTs on Centipede to its currently exposed segment
+    if (b.def.modelType === 'molten_boss' && b.segments.length > 0) {
+      const vuln = this.getVulnerableCentipedeSegment(b);
+      if (vuln) {
+        this.damageCentipedeSegment(b, vuln, amount, color, isCrit);
+      }
+      return;
+    }
+
+    let finalAmount = amount;
+    let finalColor = color;
+
+    // Treant Living Heart-Roots grant 80% Bark Shield!
+    if (b.def.modelType === 'treant_boss' && b.subNodes.length > 0 && !silent) {
+      finalAmount = Math.max(1, Math.round(amount * 0.2));
+      finalColor = '#86efac';
+    }
+
+    // Aethelgard Orbiting Starlight Pylons grant 90% Astral Shield!
+    if (b.def.modelType === 'astral_boss' && b.subNodes.length > 0 && !silent) {
+      finalAmount = Math.max(1, Math.round(amount * 0.1));
+      finalColor = '#7dd3fc';
+    }
+
+    // Striking the TRUE Malakor dispels all active Mirror Clones & staggers him!
+    if (b.def.modelType === 'void_boss' && b.clones.length > 0 && !silent) {
+      for (const c of b.clones) {
+        this.spawnParticles(c.position.clone().add(new THREE.Vector3(0, 1.6, 0)), '#c084fc', 20, 5);
+        this.scene.remove(c.group);
+      }
+      b.clones.length = 0;
+      finalAmount = Math.round(finalAmount * 1.25);
+      finalColor = '#f0abfc';
+      sound.playExplosion();
+      if (this.onBannerNotification) {
+        this.onBannerNotification('🔮 TRUE MALAKOR STRUCK!', 'All Mirror Clones dispelled — +25% Bonus Stagger Damage!', '#f0abfc');
+      }
+    }
+
+    b.hp -= finalAmount;
     if (!silent) sound.playMonsterHit();
 
     if (this.onDamageNumber) {
       this.onDamageNumber(
         b.position.clone().add(new THREE.Vector3(0, 3.2, 0)),
-        amount,
-        color,
+        finalAmount,
+        finalColor,
         isCrit
       );
     }
@@ -1190,40 +1984,43 @@ export class EntityManager {
     );
 
     if (b.hp <= 0) {
-      const defeatedDef = b.def;
-      const deathPos = b.position.clone();
-      this.scene.remove(b.rootGroup);
-      this.activeBoss = null;
+      this.handleBossDeath(b);
+    }
+  }
 
-      sound.playFanfare();
-      this.spawnShockwave(deathPos, 18, defeatedDef.glowColor);
-      this.spawnParticles(deathPos.clone().add(new THREE.Vector3(0, 2, 0)), defeatedDef.glowColor, 55, 9);
+  private handleBossDeath(b: ActiveBoss): void {
+    const defeatedDef = b.def;
+    const deathPos = b.position.clone();
+    this.cleanupActiveBoss();
 
-      // Drop boss cores & rewards directly + as 3D items
-      for (const drop of defeatedDef.drops) {
-        const count = drop.min + Math.floor(Math.random() * (drop.max - drop.min + 1));
-        this.spawnDroppedItem(drop.itemId, count, deathPos.clone().add(new THREE.Vector3(0, 1.5, 0)));
-      }
+    sound.playFanfare();
+    this.spawnShockwave(deathPos, 18, defeatedDef.glowColor);
+    this.spawnParticles(deathPos.clone().add(new THREE.Vector3(0, 2, 0)), defeatedDef.glowColor, 55, 9);
 
-      this.player.defeatedBosses.add(defeatedDef.id);
-      if (defeatedDef.unlocksTier > this.player.unlockedTier) {
-        this.player.unlockedTier = defeatedDef.unlocksTier as ProgressionTier;
-      }
-      this.player.gainXp(defeatedDef.tier * 280);
-      if (defeatedDef.id === 'boss_sylvan_behemoth') this.player.unlockAchievement('slay_behemoth');
-      if (defeatedDef.id === 'boss_cryonax') this.player.unlockAchievement('slay_cryonax');
-      if (defeatedDef.id === 'boss_ignis_rex') this.player.unlockAchievement('slay_ignis');
-      if (defeatedDef.id === 'boss_malakor') this.player.unlockAchievement('slay_malakor');
-      if (defeatedDef.id === 'boss_aethelgard') this.player.unlockAchievement('slay_aethelgard');
-      this.player.savePlayerState();
+    // Drop boss cores & rewards directly + as 3D items
+    for (const drop of defeatedDef.drops) {
+      const count = drop.min + Math.floor(Math.random() * (drop.max - drop.min + 1));
+      this.spawnDroppedItem(drop.itemId, count, deathPos.clone().add(new THREE.Vector3(0, 1.5, 0)));
+    }
 
-      if (this.onBannerNotification) {
-        this.onBannerNotification(
-          `${defeatedDef.name.toUpperCase()} VANQUISHED!`,
-          defeatedDef.unlockMessage,
-          defeatedDef.glowColor
-        );
-      }
+    this.player.defeatedBosses.add(defeatedDef.id);
+    if (defeatedDef.unlocksTier > this.player.unlockedTier) {
+      this.player.unlockedTier = defeatedDef.unlocksTier as ProgressionTier;
+    }
+    this.player.gainXp(defeatedDef.tier * 280);
+    if (defeatedDef.id === 'boss_sylvan_behemoth') this.player.unlockAchievement('slay_behemoth');
+    if (defeatedDef.id === 'boss_cryonax') this.player.unlockAchievement('slay_cryonax');
+    if (defeatedDef.id === 'boss_ignis_rex') this.player.unlockAchievement('slay_ignis');
+    if (defeatedDef.id === 'boss_malakor') this.player.unlockAchievement('slay_malakor');
+    if (defeatedDef.id === 'boss_aethelgard') this.player.unlockAchievement('slay_aethelgard');
+    this.player.savePlayerState();
+
+    if (this.onBannerNotification) {
+      this.onBannerNotification(
+        `${defeatedDef.name.toUpperCase()} VANQUISHED!`,
+        defeatedDef.unlockMessage,
+        defeatedDef.glowColor
+      );
     }
   }
 
@@ -1280,7 +2077,15 @@ export class EntityManager {
       if (p.homing && p.fromPlayer) {
         let targetPos: THREE.Vector3 | null = null;
         if (this.activeBoss) {
-          targetPos = this.activeBoss.position.clone().add(new THREE.Vector3(0, 2.0, 0));
+          const b = this.activeBoss;
+          if (b.subNodes.length > 0) {
+            targetPos = b.subNodes[0].position.clone().add(new THREE.Vector3(0, 1.0, 0));
+          } else if (b.def.modelType === 'molten_boss') {
+            const vuln = this.getVulnerableCentipedeSegment(b);
+            targetPos = vuln ? vuln.position.clone().add(new THREE.Vector3(0, 1.3, 0)) : b.position.clone();
+          } else {
+            targetPos = b.position.clone().add(new THREE.Vector3(0, 2.0, 0));
+          }
         } else if (this.monsters.length > 0) {
           let closest = this.monsters[0];
           let minDist = p.position.distanceTo(closest.position);
@@ -1342,21 +2147,75 @@ export class EntityManager {
           }
         }
 
+        let forceStopProjectile = false;
+
         if (!hitSomething && this.activeBoss) {
-          const bossCenter = this.activeBoss.position.clone().add(new THREE.Vector3(0, 2.2, 0));
-          if (p.position.distanceTo(bossCenter) <= 2.4 + p.radius) {
-            this.applyStatusToEntity(this.activeBoss, p.statusEffect);
-            if (p.explosiveRadius) {
-              this.spawnShockwave(p.position, p.explosiveRadius, p.color);
-              this.damageAllEnemiesInRadius(p.position, p.explosiveRadius, p.damage, p.statusEffect);
-            } else {
-              this.damageBoss(p.damage, p.color);
+          const b = this.activeBoss;
+
+          // 1. Check Boss Sub-Nodes (Roots / Orbiting Shield Pylons)
+          for (let nIdx = b.subNodes.length - 1; nIdx >= 0; nIdx--) {
+            const nodeCenter = b.subNodes[nIdx].position.clone().add(new THREE.Vector3(0, 1.1, 0));
+            if (p.position.distanceTo(nodeCenter) <= 1.55 + p.radius) {
+              this.damageBossSubNode(b, nIdx, p.damage, false);
+              hitSomething = true;
+              break;
             }
-            hitSomething = true;
+          }
+
+          // 2. Check Malakor's Mirror Clones
+          if (!hitSomething && b.clones.length > 0) {
+            for (let cIdx = b.clones.length - 1; cIdx >= 0; cIdx--) {
+              const cCenter = b.clones[cIdx].position.clone().add(new THREE.Vector3(0, 1.8, 0));
+              if (p.position.distanceTo(cCenter) <= 2.0 + p.radius) {
+                sound.playMagicCast(0.5);
+                this.spawnParticles(cCenter, '#c084fc', 24, 5);
+                this.scene.remove(b.clones[cIdx].group);
+                b.clones.splice(cIdx, 1);
+                hitSomething = true;
+                break;
+              }
+            }
+          }
+
+          // 3. Check Ignis Rex Centipede Segments (Anti-Pierce Carapace: NEVER lets projectiles pierce!)
+          if (!hitSomething && b.def.modelType === 'molten_boss' && b.segments.length > 0) {
+            let hitSeg: CentipedeSegment | null = null;
+            let bestDist = Infinity;
+            for (const seg of b.segments) {
+              if (!seg.alive) continue;
+              const sCenter = seg.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+              const d = p.position.distanceTo(sCenter);
+              if (d <= 2.1 + p.radius && d < bestDist) {
+                bestDist = d;
+                hitSeg = seg;
+              }
+            }
+            if (hitSeg) {
+              this.applyStatusToEntity(b, p.statusEffect);
+              this.damageCentipedeSegment(b, hitSeg, p.damage, p.color, false);
+              hitSomething = true;
+              // Centipede's obsidian carapace completely stops ALL projectiles from piercing!
+              forceStopProjectile = true;
+            }
+          }
+
+          // 4. Standard Boss Body Hit
+          if (!hitSomething && b.def.modelType !== 'molten_boss') {
+            const bossCenter = b.position.clone().add(new THREE.Vector3(0, 2.2, 0));
+            if (p.position.distanceTo(bossCenter) <= 2.5 + p.radius) {
+              this.applyStatusToEntity(b, p.statusEffect);
+              if (p.explosiveRadius) {
+                this.spawnShockwave(p.position, p.explosiveRadius, p.color);
+                this.damageAllEnemiesInRadius(p.position, p.explosiveRadius, p.damage, p.statusEffect);
+              } else {
+                this.damageBoss(p.damage, p.color);
+              }
+              hitSomething = true;
+            }
           }
         }
 
-        if (hitSomething && !p.piercing) {
+        if (hitSomething && (!p.piercing || forceStopProjectile)) {
           this.scene.remove(p.mesh);
           this.projectiles.splice(i, 1);
         }
@@ -1793,6 +2652,9 @@ export class EntityManager {
     rightArm: THREE.Object3D;
     leftLeg: THREE.Object3D;
     rightLeg: THREE.Object3D;
+    shieldMesh: THREE.Mesh | null;
+    primaryBodyMat: THREE.MeshLambertMaterial;
+    headWeakpointMesh: THREE.Mesh;
   } {
     const rootGroup = new THREE.Group();
     const s = def.scale;
@@ -1806,117 +2668,349 @@ export class EntityManager {
     });
     const glowMat = new THREE.MeshBasicMaterial({ color: def.glowColor });
 
-    // Multi-layered Armored Boss Torso + Ribcage Plates + Glowing Heart Core
-    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.95 * s, 0.38 * s, 0.62 * s), darkMat);
-    pelvis.position.y = 0.92 * s;
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(1.28 * s, 1.38 * s, 0.78 * s), bodyMat);
-    torso.position.y = 1.65 * s;
-    const chestArmor = new THREE.Mesh(new THREE.BoxGeometry(1.36 * s, 0.65 * s, 0.84 * s), accentMat);
-    chestArmor.position.y = 1.88 * s;
-    const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.42 * s, 0), glowMat);
-    core.position.set(0, 1.65 * s, 0.42 * s);
-    rootGroup.add(pelvis, torso, chestArmor, core);
+    const leftArm = new THREE.Group();
+    const rightArm = new THREE.Group();
+    const leftLeg = new THREE.Group();
+    const rightLeg = new THREE.Group();
+    let haloRing1: THREE.Object3D | null = null;
+    let haloRing2: THREE.Object3D | null = null;
+    let shieldMesh: THREE.Mesh | null = null;
+    const headWeakpointMesh = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.55 * s, 0),
+      new THREE.MeshBasicMaterial({ color: '#fde047' })
+    );
+    headWeakpointMesh.visible = false;
 
-    // Boss Head + Horns / Antlers / Seraph Crown + Visor Eyes
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.76 * s, 0.76 * s, 0.76 * s), bodyMat);
-    head.position.set(0, 2.72 * s, 0);
-    const crown = new THREE.Mesh(new THREE.BoxGeometry(1.12 * s, 0.32 * s, 0.44 * s), accentMat);
-    crown.position.set(0, 0.44 * s, 0);
-    const hornL = new THREE.Mesh(new THREE.ConeGeometry(0.16 * s, 0.75 * s, 4), glowMat);
-    hornL.position.set(-0.48 * s, 0.68 * s, 0);
-    hornL.rotation.z = 0.35;
-    const hornR = new THREE.Mesh(new THREE.ConeGeometry(0.16 * s, 0.75 * s, 4), glowMat);
-    hornR.position.set(0.48 * s, 0.68 * s, 0);
-    hornR.rotation.z = -0.35;
-    const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.58 * s, 0.15 * s, 0.08 * s), glowMat);
-    eyes.position.set(0, 0.06 * s, 0.39 * s);
-    head.add(crown, hornL, hornR, eyes);
-    rootGroup.add(head);
+    if (def.modelType === 'frost_boss') {
+      // =====================================================
+      // CRYONAX: WINGED GLACIAL SKY-DRAGON
+      // =====================================================
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(1.15 * s, 0.85 * s, 2.35 * s), bodyMat);
+      torso.position.set(0, 1.15 * s, 0);
+      const belly = new THREE.Mesh(new THREE.BoxGeometry(0.88 * s, 0.25 * s, 2.1 * s), accentMat);
+      belly.position.set(0, 0.72 * s, 0.05 * s);
+      rootGroup.add(torso, belly);
 
-    // 6 Articulated Wings for Aethelgard / Void Boss, or Back Spires for Titans
-    if (def.modelType === 'astral_boss' || def.modelType === 'void_boss') {
-      const wingPairs = def.modelType === 'astral_boss' ? 3 : 2;
-      for (let w = 0; w < wingPairs; w++) {
+      // Dorsal Ice Spines along back & tail
+      for (let i = 0; i < 6; i++) {
+        const spine = new THREE.Mesh(new THREE.ConeGeometry(0.14 * s, 0.55 * s, 4), glowMat);
+        spine.position.set(0, 1.72 * s - i * 0.05 * s, 0.85 * s - i * 0.42 * s);
+        spine.rotation.x = -0.35;
+        rootGroup.add(spine);
+      }
+
+      // Dragon Neck + Horned Dragon Skull + Glowing Ice Jaws
+      const neck = new THREE.Mesh(new THREE.BoxGeometry(0.62 * s, 0.65 * s, 1.05 * s), bodyMat);
+      neck.position.set(0, 1.55 * s, 1.35 * s);
+      neck.rotation.x = -0.35;
+      const skull = new THREE.Mesh(new THREE.BoxGeometry(0.76 * s, 0.58 * s, 1.05 * s), bodyMat);
+      skull.position.set(0, 1.88 * s, 2.08 * s);
+      const lowerJaw = new THREE.Mesh(new THREE.BoxGeometry(0.58 * s, 0.2 * s, 0.88 * s), accentMat);
+      lowerJaw.position.set(0, 1.52 * s, 2.08 * s);
+      lowerJaw.rotation.x = 0.22;
+      for (const side of [-1, 1]) {
+        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.15 * s, 0.95 * s, 4), glowMat);
+        horn.position.set(side * 0.34 * s, 2.25 * s, 1.75 * s);
+        horn.rotation.x = -0.75;
+        horn.rotation.z = -side * 0.28;
+        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.16 * s, 0.14 * s, 0.14 * s), glowMat);
+        eye.position.set(side * 0.39 * s, 1.96 * s, 2.25 * s);
+        rootGroup.add(horn, eye);
+      }
+      rootGroup.add(neck, skull, lowerJaw);
+
+      // Segmented Spiked Dragon Tail
+      for (let t = 0; t < 4; t++) {
+        const segScale = 1 - t * 0.18;
+        const tailSeg = new THREE.Mesh(
+          new THREE.BoxGeometry(0.58 * s * segScale, 0.48 * s * segScale, 0.85 * s),
+          t % 2 === 0 ? bodyMat : accentMat
+        );
+        tailSeg.position.set(0, (1.05 - t * 0.08) * s, (-1.45 - t * 0.75) * s);
+        rootGroup.add(tailSeg);
+      }
+
+      // Massive Articulated Crystal Dragon Wings (leftArm & rightArm)
+      leftArm.position.set(-0.55 * s, 1.48 * s, 0.35 * s);
+      rightArm.position.set(0.55 * s, 1.48 * s, 0.35 * s);
+      const wingMembraneMat = new THREE.MeshBasicMaterial({
+        color: '#38bdf8',
+        transparent: true,
+        opacity: 0.72,
+        side: THREE.DoubleSide,
+      });
+      for (const { wingGrp, side } of [
+        { wingGrp: leftArm, side: -1 },
+        { wingGrp: rightArm, side: 1 },
+      ]) {
+        const bone1 = new THREE.Mesh(new THREE.BoxGeometry(1.75 * s, 0.16 * s, 0.18 * s), accentMat);
+        bone1.position.set(side * 0.88 * s, 0.18 * s, 0.15 * s);
+        bone1.rotation.z = side * 0.18;
+        const bone2 = new THREE.Mesh(new THREE.BoxGeometry(1.55 * s, 0.13 * s, 0.14 * s), glowMat);
+        bone2.position.set(side * 2.35 * s, 0.25 * s, -0.1 * s);
+        bone2.rotation.z = -side * 0.12;
+        const membrane = new THREE.Mesh(new THREE.BoxGeometry(2.95 * s, 0.05 * s, 1.55 * s), wingMembraneMat);
+        membrane.position.set(side * 1.62 * s, 0.12 * s, -0.52 * s);
+        wingGrp.add(bone1, bone2, membrane);
+      }
+
+      // 4 Clawed Dragon Talons
+      leftLeg.position.set(-0.52 * s, 0.75 * s, -0.65 * s);
+      rightLeg.position.set(0.52 * s, 0.75 * s, -0.65 * s);
+      for (const leg of [leftLeg, rightLeg]) {
+        const claw = new THREE.Mesh(new THREE.BoxGeometry(0.32 * s, 0.75 * s, 0.36 * s), bodyMat);
+        claw.position.y = -0.35 * s;
+        leg.add(claw);
+      }
+      rootGroup.add(leftArm, rightArm, leftLeg, rightLeg);
+    } else if (def.modelType === 'molten_boss') {
+      // =====================================================
+      // IGNIS REX: ARMORED MAGMA CENTIPEDE HEAD (Segment 0)
+      // =====================================================
+      const carapace = new THREE.Mesh(new THREE.BoxGeometry(1.45 * s, 0.92 * s, 1.55 * s), bodyMat);
+      carapace.position.set(0, 0.85 * s, 0);
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(1.05 * s, 0.35 * s, 1.25 * s), accentMat);
+      ridge.position.set(0, 1.38 * s, -0.05 * s);
+      headWeakpointMesh.position.set(0, 1.65 * s, 0);
+      rootGroup.add(carapace, ridge, headWeakpointMesh);
+
+      // Glowing Centipede Eyes & Snapping Obsidian Mandibles
+      for (const side of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.22 * s, 0.18 * s, 0.18 * s), glowMat);
+        eye.position.set(side * 0.52 * s, 1.02 * s, 0.72 * s);
+        const antenna = new THREE.Mesh(new THREE.ConeGeometry(0.08 * s, 0.95 * s, 4), accentMat);
+        antenna.position.set(side * 0.36 * s, 1.35 * s, 0.95 * s);
+        antenna.rotation.x = 0.85;
+        antenna.rotation.z = -side * 0.35;
+        rootGroup.add(eye, antenna);
+      }
+
+      leftArm.position.set(-0.55 * s, 0.65 * s, 0.78 * s);
+      rightArm.position.set(0.55 * s, 0.65 * s, 0.78 * s);
+      const pincerL = new THREE.Mesh(new THREE.ConeGeometry(0.22 * s, 1.15 * s, 4), glowMat);
+      pincerL.rotation.x = Math.PI * 0.5;
+      pincerL.rotation.z = -0.35;
+      pincerL.position.set(0.15 * s, 0, 0.48 * s);
+      const pincerR = new THREE.Mesh(new THREE.ConeGeometry(0.22 * s, 1.15 * s, 4), glowMat);
+      pincerR.rotation.x = Math.PI * 0.5;
+      pincerR.rotation.z = 0.35;
+      pincerR.position.set(-0.15 * s, 0, 0.48 * s);
+      leftArm.add(pincerL);
+      rightArm.add(pincerR);
+
+      // Head Leg Pairs
+      leftLeg.position.set(-0.72 * s, 0.55 * s, 0);
+      rightLeg.position.set(0.72 * s, 0.55 * s, 0);
+      const lLeg = new THREE.Mesh(new THREE.BoxGeometry(0.65 * s, 0.16 * s, 0.2 * s), accentMat);
+      lLeg.position.set(-0.28 * s, -0.18 * s, 0);
+      lLeg.rotation.z = 0.45;
+      const rLeg = new THREE.Mesh(new THREE.BoxGeometry(0.65 * s, 0.16 * s, 0.2 * s), accentMat);
+      rLeg.position.set(0.28 * s, -0.18 * s, 0);
+      rLeg.rotation.z = -0.45;
+      leftLeg.add(lLeg);
+      rightLeg.add(rLeg);
+
+      rootGroup.add(leftArm, rightArm, leftLeg, rightLeg);
+    } else if (def.modelType === 'treant_boss') {
+      // =====================================================
+      // SYLVAN BEHEMOTH: GNARLED CANOPY TREANT COLOSSUS
+      // =====================================================
+      const trunk = new THREE.Mesh(new THREE.BoxGeometry(1.38 * s, 1.75 * s, 1.15 * s), bodyMat);
+      trunk.position.y = 1.45 * s;
+      const sapHeart = new THREE.Mesh(new THREE.OctahedronGeometry(0.46 * s, 0), glowMat);
+      sapHeart.position.set(0, 1.55 * s, 0.58 * s);
+
+      // Massive Lush Leafy Forest Canopy Crown
+      const canopyMain = new THREE.Mesh(new THREE.DodecahedronGeometry(1.25 * s, 0), accentMat);
+      canopyMain.position.set(0, 3.05 * s, -0.1 * s);
+      const canopyL = new THREE.Mesh(new THREE.DodecahedronGeometry(0.85 * s, 0), accentMat);
+      canopyL.position.set(-0.95 * s, 2.75 * s, 0.1 * s);
+      const canopyR = new THREE.Mesh(new THREE.DodecahedronGeometry(0.85 * s, 0), accentMat);
+      canopyR.position.set(0.95 * s, 2.75 * s, 0.1 * s);
+      const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.68 * s, 0.16 * s, 0.1 * s), glowMat);
+      eyes.position.set(0, 2.18 * s, 0.59 * s);
+      rootGroup.add(trunk, sapHeart, canopyMain, canopyL, canopyR, eyes);
+
+      // Bark Bulwark Shield Sphere (visible while Living Heart-Roots are alive!)
+      shieldMesh = new THREE.Mesh(
+        new THREE.OctahedronGeometry(2.15 * s, 1),
+        new THREE.MeshBasicMaterial({
+          color: '#4ade80',
+          wireframe: true,
+          transparent: true,
+          opacity: 0.45,
+        })
+      );
+      shieldMesh.position.y = 1.75 * s;
+      rootGroup.add(shieldMesh);
+
+      // Asymmetrical Wooden Branch-Claw Arms
+      leftArm.position.set(-1.05 * s, 2.15 * s, 0);
+      rightArm.position.set(1.05 * s, 2.15 * s, 0);
+      for (const arm of [leftArm, rightArm]) {
+        const log = new THREE.Mesh(new THREE.BoxGeometry(0.48 * s, 1.55 * s, 0.48 * s), bodyMat);
+        log.position.y = -0.68 * s;
+        const vine = new THREE.Mesh(new THREE.BoxGeometry(0.54 * s, 0.35 * s, 0.54 * s), accentMat);
+        vine.position.y = -1.15 * s;
+        arm.add(log, vine);
+      }
+
+      // Rooted Trunk Legs
+      leftLeg.position.set(-0.48 * s, 0.8 * s, 0);
+      rightLeg.position.set(0.48 * s, 0.8 * s, 0);
+      for (const leg of [leftLeg, rightLeg]) {
+        const root = new THREE.Mesh(new THREE.BoxGeometry(0.55 * s, 0.85 * s, 0.68 * s), bodyMat);
+        root.position.y = -0.4 * s;
+        leg.add(root);
+      }
+      rootGroup.add(leftArm, rightArm, leftLeg, rightLeg);
+    } else if (def.modelType === 'void_boss') {
+      // =====================================================
+      // MALAKOR: LEVITATING SHADOW-CLONE VOID ARCHON
+      // =====================================================
+      const robeSpire = new THREE.Mesh(new THREE.ConeGeometry(0.95 * s, 2.25 * s, 6), bodyMat);
+      robeSpire.position.y = 1.35 * s;
+      robeSpire.rotation.x = Math.PI;
+      const mantle = new THREE.Mesh(new THREE.BoxGeometry(1.65 * s, 0.42 * s, 0.72 * s), accentMat);
+      mantle.position.y = 2.32 * s;
+      const hood = new THREE.Mesh(new THREE.OctahedronGeometry(0.58 * s, 0), darkMat);
+      hood.position.y = 2.85 * s;
+      const cyclopsEye = new THREE.Mesh(new THREE.OctahedronGeometry(0.24 * s, 0), glowMat);
+      cyclopsEye.position.set(0, 2.85 * s, 0.42 * s);
+      rootGroup.add(robeSpire, mantle, hood, cyclopsEye);
+
+      // 4 Telekinetic Floating Void-Blades hovering around Malakor
+      leftArm.position.set(-1.15 * s, 2.05 * s, 0.2 * s);
+      rightArm.position.set(1.15 * s, 2.05 * s, 0.2 * s);
+      for (const { grp, side } of [
+        { grp: leftArm, side: -1 },
+        { grp: rightArm, side: 1 },
+      ]) {
+        for (let bIdx = 0; bIdx < 2; bIdx++) {
+          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.1 * s, 1.35 * s, 0.24 * s), bIdx === 0 ? accentMat : glowMat);
+          blade.position.set(side * bIdx * 0.38 * s, (bIdx - 0.5) * 0.45 * s, 0.2 * s);
+          blade.rotation.z = side * 0.25;
+          grp.add(blade);
+        }
+      }
+      haloRing1 = new THREE.Mesh(new THREE.TorusGeometry(1.45 * s, 0.07 * s, 8, 24), accentMat);
+      haloRing1.position.set(0, 2.1 * s, -0.25 * s);
+      rootGroup.add(leftArm, rightArm, leftLeg, rightLeg, haloRing1);
+    } else {
+      // =====================================================
+      // AETHELGARD: SIX-WINGED CELESTIAL SERAPH CONSTRUCT
+      // =====================================================
+      const obeliskBody = new THREE.Mesh(new THREE.OctahedronGeometry(1.05 * s, 0), bodyMat);
+      obeliskBody.scale.set(0.95, 1.85, 0.75);
+      obeliskBody.position.y = 1.85 * s;
+      const starCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.52 * s, 0), glowMat);
+      starCore.position.set(0, 1.95 * s, 0.52 * s);
+      const seraphHead = new THREE.Mesh(new THREE.OctahedronGeometry(0.55 * s, 0), accentMat);
+      seraphHead.position.y = 3.25 * s;
+      const crownHalo = new THREE.Mesh(new THREE.TorusGeometry(0.68 * s, 0.08 * s, 6, 20), glowMat);
+      crownHalo.position.set(0, 3.55 * s, 0);
+      crownHalo.rotation.x = Math.PI / 2;
+      rootGroup.add(obeliskBody, starCore, seraphHead, crownHalo);
+
+      // 6 Huge Articulated Golden-Cyan Seraph Wings
+      for (let w = 0; w < 3; w++) {
         for (const side of [-1, 1]) {
-          const wing = new THREE.Mesh(new THREE.BoxGeometry(1.45 * s, 0.24 * s, 0.08 * s), w % 2 === 0 ? accentMat : glowMat);
-          wing.position.set(side * 1.15 * s, (2.25 - w * 0.42) * s, -0.42 * s);
-          wing.rotation.z = side * (0.35 - w * 0.22);
-          wing.rotation.y = -side * 0.25;
+          const wing = new THREE.Mesh(
+            new THREE.BoxGeometry(1.95 * s, 0.26 * s, 0.09 * s),
+            w % 2 === 0 ? accentMat : glowMat
+          );
+          wing.position.set(side * 1.38 * s, (2.65 - w * 0.48) * s, -0.35 * s);
+          wing.rotation.z = side * (0.42 - w * 0.28);
+          wing.rotation.y = -side * 0.22;
           rootGroup.add(wing);
         }
       }
-    } else {
-      // Back Crystal / Magma / Canopy Spires
-      for (const side of [-1, 1]) {
-        const spire = new THREE.Mesh(new THREE.ConeGeometry(0.24 * s, 0.95 * s, 5), accentMat);
-        spire.position.set(side * 0.45 * s, 2.35 * s, -0.45 * s);
-        spire.rotation.x = -0.4;
-        spire.rotation.z = -side * 0.25;
-        rootGroup.add(spire);
-      }
-    }
 
-    // Pauldrons, Giant Arms & Signature Boss Weapon in Right Hand
-    const leftArm = new THREE.Group();
-    leftArm.position.set(-0.96 * s, 2.15 * s, 0);
-    const lPauldron = new THREE.Mesh(new THREE.BoxGeometry(0.58 * s, 0.45 * s, 0.58 * s), accentMat);
-    const lLimb = new THREE.Mesh(new THREE.BoxGeometry(0.44 * s, 1.32 * s, 0.44 * s), bodyMat);
-    lLimb.position.y = -0.62 * s;
-    const lGauntlet = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.42 * s, 0.5 * s), accentMat);
-    lGauntlet.position.y = -1.1 * s;
-    leftArm.add(lPauldron, lLimb, lGauntlet);
+      // Twin Interlocking Celestial Gyroscope Rings
+      haloRing1 = new THREE.Mesh(new THREE.TorusGeometry(1.65 * s, 0.08 * s, 8, 28), accentMat);
+      haloRing1.position.set(0, 2.05 * s, -0.2 * s);
+      haloRing2 = new THREE.Mesh(new THREE.TorusGeometry(2.05 * s, 0.07 * s, 8, 28), glowMat);
+      haloRing2.position.set(0, 2.05 * s, -0.2 * s);
+      rootGroup.add(haloRing1, haloRing2);
 
-    const rightArm = new THREE.Group();
-    rightArm.position.set(0.96 * s, 2.15 * s, 0);
-    const rPauldron = new THREE.Mesh(new THREE.BoxGeometry(0.58 * s, 0.45 * s, 0.58 * s), accentMat);
-    const rLimb = new THREE.Mesh(new THREE.BoxGeometry(0.44 * s, 1.32 * s, 0.44 * s), bodyMat);
-    rLimb.position.y = -0.62 * s;
-    const rGauntlet = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.42 * s, 0.5 * s), accentMat);
-    rGauntlet.position.y = -1.1 * s;
-    // Boss Great-Weapon held in right hand
-    const weapShaft = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.14 * s, 1.85 * s), darkMat);
-    weapShaft.position.set(0, -1.15 * s, 0.65 * s);
-    const weapBlade = new THREE.Mesh(new THREE.BoxGeometry(0.32 * s, 0.65 * s, 0.95 * s), glowMat);
-    weapBlade.position.set(0, -1.15 * s, 1.45 * s);
-    rightArm.add(rPauldron, rLimb, rGauntlet, weapShaft, weapBlade);
-
-    // Articulated Boss Legs
-    const leftLeg = new THREE.Group();
-    leftLeg.position.set(-0.38 * s, 0.9 * s, 0);
-    const lLegMesh = new THREE.Mesh(new THREE.BoxGeometry(0.46 * s, 0.9 * s, 0.46 * s), bodyMat);
-    lLegMesh.position.y = -0.45 * s;
-    const lBoot = new THREE.Mesh(new THREE.BoxGeometry(0.52 * s, 0.28 * s, 0.56 * s), accentMat);
-    lBoot.position.set(0, -0.76 * s, 0.05 * s);
-    leftLeg.add(lLegMesh, lBoot);
-
-    const rightLeg = new THREE.Group();
-    rightLeg.position.set(0.38 * s, 0.9 * s, 0);
-    const rLegMesh = new THREE.Mesh(new THREE.BoxGeometry(0.46 * s, 0.9 * s, 0.46 * s), bodyMat);
-    rLegMesh.position.y = -0.45 * s;
-    const rBoot = new THREE.Mesh(new THREE.BoxGeometry(0.52 * s, 0.28 * s, 0.56 * s), accentMat);
-    rBoot.position.set(0, -0.76 * s, 0.05 * s);
-    rightLeg.add(rLegMesh, rBoot);
-
-    rootGroup.add(leftArm, rightArm, leftLeg, rightLeg);
-
-    // Rotating Halo / Cryo / Astral Rings for bosses
-    const haloRing1 = new THREE.Mesh(
-      new THREE.TorusGeometry(1.38 * s, 0.08 * s, 8, 24),
-      accentMat
-    );
-    haloRing1.position.set(0, 1.95 * s, -0.35 * s);
-    rootGroup.add(haloRing1);
-
-    let haloRing2: THREE.Object3D | null = null;
-    if (def.tier >= 5) {
-      haloRing2 = new THREE.Mesh(
-        new THREE.TorusGeometry(1.78 * s, 0.07 * s, 8, 24),
-        glowMat
+      // Starlight Aegis Barrier Sphere (visible while Orbiting Shield Pylons are alive!)
+      shieldMesh = new THREE.Mesh(
+        new THREE.OctahedronGeometry(2.35 * s, 1),
+        new THREE.MeshBasicMaterial({
+          color: '#fde047',
+          wireframe: true,
+          transparent: true,
+          opacity: 0.48,
+        })
       );
-      haloRing2.position.set(0, 1.95 * s, -0.35 * s);
-      rootGroup.add(haloRing2);
+      shieldMesh.position.y = 2.0 * s;
+      rootGroup.add(shieldMesh, leftArm, rightArm, leftLeg, rightLeg);
     }
 
-    return { rootGroup, haloRing1, haloRing2, leftArm, rightArm, leftLeg, rightLeg };
+    return {
+      rootGroup,
+      haloRing1,
+      haloRing2,
+      leftArm,
+      rightArm,
+      leftLeg,
+      rightLeg,
+      shieldMesh,
+      primaryBodyMat: bodyMat,
+      headWeakpointMesh,
+    };
+  }
+
+  private buildCentipedeSegmentMesh(
+    def: BossDef,
+    isInitialTail: boolean
+  ): {
+    group: THREE.Group;
+    armorMat: THREE.MeshLambertMaterial;
+    weakpointMesh: THREE.Mesh;
+    leftLegs: THREE.Object3D;
+    rightLegs: THREE.Object3D;
+  } {
+    const group = new THREE.Group();
+    const s = def.scale;
+
+    const armorMat = new THREE.MeshLambertMaterial({
+      color: isInitialTail ? '#ea580c' : '#290f02',
+      emissive: isInitialTail ? '#f97316' : '#451a03',
+      emissiveIntensity: isInitialTail ? 0.55 : 0.15,
+    });
+    const spineMat = new THREE.MeshLambertMaterial({
+      color: def.accentColor,
+      emissive: def.accentColor,
+      emissiveIntensity: 0.4,
+    });
+    const weakMat = new THREE.MeshBasicMaterial({ color: '#fde047' });
+
+    const shell = new THREE.Mesh(new THREE.BoxGeometry(1.26 * s, 0.78 * s, 1.18 * s), armorMat);
+    shell.position.y = 0.72 * s;
+    const spine = new THREE.Mesh(new THREE.ConeGeometry(0.2 * s, 0.55 * s, 4), spineMat);
+    spine.position.y = 1.32 * s;
+    const weakpointMesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.52 * s, 0), weakMat);
+    weakpointMesh.position.y = 1.48 * s;
+    weakpointMesh.visible = isInitialTail;
+    group.add(shell, spine, weakpointMesh);
+
+    const leftLegs = new THREE.Group();
+    leftLegs.position.set(-0.62 * s, 0.5 * s, 0);
+    const lClaw = new THREE.Mesh(new THREE.BoxGeometry(0.62 * s, 0.14 * s, 0.18 * s), spineMat);
+    lClaw.position.set(-0.26 * s, -0.16 * s, 0);
+    lClaw.rotation.z = 0.45;
+    leftLegs.add(lClaw);
+
+    const rightLegs = new THREE.Group();
+    rightLegs.position.set(0.62 * s, 0.5 * s, 0);
+    const rClaw = new THREE.Mesh(new THREE.BoxGeometry(0.62 * s, 0.14 * s, 0.18 * s), spineMat);
+    rClaw.position.set(0.26 * s, -0.16 * s, 0);
+    rClaw.rotation.z = -0.45;
+    rightLegs.add(rClaw);
+
+    group.add(leftLegs, rightLegs);
+
+    return { group, armorMat, weakpointMesh, leftLegs, rightLegs };
   }
 }
