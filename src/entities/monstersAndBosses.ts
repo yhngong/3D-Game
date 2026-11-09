@@ -846,7 +846,8 @@ export class EntityManager {
 
   public performPlayerMeleeAttack(item: typeof ITEMS[string]): void {
     const reach = item.reach || 4.5;
-    const baseDmg = Math.round((item.damage || 10) * this.player.getDamageMultiplier());
+    const { multiplier: powerMult, isMaxPower } = this.player.consumeWeaponPower();
+    const baseDmg = Math.max(1, Math.round((item.damage || 10) * this.player.getDamageMultiplier() * powerMult));
     const camPos = new THREE.Vector3(
       this.player.position.x,
       this.player.position.y + this.player.eyeHeight,
@@ -855,23 +856,30 @@ export class EntityManager {
     const camDir = new THREE.Vector3();
     this.player.camera.getWorldDirection(camDir);
 
-    sound.playSwordSwing(item.iconShape === 'greatsword' || item.iconShape === 'hammer');
+    sound.playSwordSwing(isMaxPower || item.iconShape === 'greatsword' || item.iconShape === 'hammer');
 
-    // Starforged Zenith Blade fires a piercing crescent projectile on every swing!
+    if (isMaxPower) {
+      const slashPos = camPos.clone().add(camDir.clone().multiplyScalar(1.8));
+      this.spawnParticles(slashPos, item.primaryColor || '#fde047', 10, 4.5);
+    }
+
+    // Starforged Zenith Blade fires a piercing crescent projectile on swings (scaled by power bar!)
     if (item.id === 'starforged_cleaver') {
       this.spawnProjectile({
         position: camPos.clone().add(camDir.clone().multiplyScalar(1.0)),
         velocity: camDir.clone().multiplyScalar(28),
         fromPlayer: true,
-        damage: Math.round(baseDmg * 0.45),
-        radius: 0.55,
-        color: '#fde047',
+        damage: Math.max(1, Math.round(baseDmg * 0.45)),
+        radius: isMaxPower ? 0.65 : 0.45,
+        color: isMaxPower ? '#fde047' : '#38bdf8',
         maxLife: 1.8,
         gravity: 0,
         piercing: true,
         statusEffect: 'astral_mark',
       });
     }
+
+    const dmgColor = isMaxPower ? '#fde047' : powerMult < 0.5 ? '#94a3b8' : '#ffffff';
 
     // Check hit against monsters within reach cone
     for (let i = this.monsters.length - 1; i >= 0; i--) {
@@ -882,12 +890,14 @@ export class EntityManager {
       if (dist <= reach + 0.8) {
         const dot = toMob.normalize().dot(camDir);
         if (dot > 0.45 || dist < 2.2) {
-          const isCrit = Math.random() < (item.critChance || 0.1);
-          const dmg = Math.round(baseDmg * (isCrit ? 1.6 : 1.0));
-          this.applyStatusToEntity(m, item.statusEffect);
-          this.damageMonster(m, dmg, isCrit ? '#fde047' : '#ffffff', isCrit);
-          // Knockback
-          const kb = item.knockback || 5;
+          const isCrit = powerMult >= 0.8 && Math.random() < (item.critChance || 0.1);
+          const dmg = Math.max(1, Math.round(baseDmg * (isCrit ? 1.5 : 1.0)));
+          if (powerMult >= 0.5) {
+            this.applyStatusToEntity(m, item.statusEffect);
+          }
+          this.damageMonster(m, dmg, isCrit || isMaxPower ? '#fde047' : dmgColor, isCrit || isMaxPower);
+          // Knockback scaled by power bar
+          const kb = (item.knockback || 5) * Math.min(1.35, Math.max(0.35, powerMult));
           m.velocity.x += camDir.x * kb;
           m.velocity.z += camDir.z * kb;
           m.position.y += 0.25;
@@ -903,10 +913,12 @@ export class EntityManager {
       if (dist <= reach + 2.4) {
         const dot = toBoss.normalize().dot(camDir);
         if (dot > 0.35 || dist < 3.5) {
-          const isCrit = Math.random() < (item.critChance || 0.1);
-          const dmg = Math.round(baseDmg * (isCrit ? 1.6 : 1.0));
-          this.applyStatusToEntity(this.activeBoss, item.statusEffect);
-          this.damageBoss(dmg, isCrit ? '#fde047' : '#ffffff', isCrit);
+          const isCrit = powerMult >= 0.8 && Math.random() < (item.critChance || 0.1);
+          const dmg = Math.max(1, Math.round(baseDmg * (isCrit ? 1.5 : 1.0)));
+          if (powerMult >= 0.5) {
+            this.applyStatusToEntity(this.activeBoss, item.statusEffect);
+          }
+          this.damageBoss(dmg, isCrit || isMaxPower ? '#fde047' : dmgColor, isCrit || isMaxPower);
         }
       }
     }
@@ -915,11 +927,23 @@ export class EntityManager {
   public performWeaponAbility(item: typeof ITEMS[string]): boolean {
     const ab = item.ability;
     if (!ab) return false;
-    if (this.player.abilityCooldownTimer > 0) return false;
-    if (this.player.mana < ab.manaCost) return false;
+    const isRangedWeapon = item.category === 'ranged';
+    if (!isRangedWeapon && this.player.abilityCooldownTimer > 0) return false;
 
-    this.player.mana -= ab.manaCost;
-    this.player.abilityCooldownTimer = ab.cooldown;
+    // Ranged weapons use the Weapon Power Bar on every shot; melee abilities use their mana/cooldown
+    let powerMult = 1.0;
+    if (isRangedWeapon) {
+      const consumed = this.player.consumeWeaponPower();
+      powerMult = consumed.multiplier;
+      const manaNeeded = Math.max(2, Math.round(ab.manaCost * Math.min(1, consumed.pct + 0.25)));
+      if (this.player.mana < manaNeeded) return false;
+      this.player.mana -= manaNeeded;
+    } else {
+      if (this.player.mana < ab.manaCost) return false;
+      this.player.mana -= ab.manaCost;
+      this.player.abilityCooldownTimer = ab.cooldown;
+    }
+
     this.player.triggerSwing();
 
     const camPos = new THREE.Vector3(
@@ -929,7 +953,7 @@ export class EntityManager {
     );
     const camDir = new THREE.Vector3();
     this.player.camera.getWorldDirection(camDir);
-    const baseDmg = Math.round((item.damage || 20) * this.player.getDamageMultiplier());
+    const baseDmg = Math.max(1, Math.round((item.damage || 20) * this.player.getDamageMultiplier() * powerMult));
 
     switch (ab.type) {
       case 'arrow_shot':

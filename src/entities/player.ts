@@ -64,6 +64,7 @@ export class PlayerController {
 
   // Cooldowns & animations
   public attackCooldownTimer = 0;
+  public weaponPower = 1.0; // 0.0 to 1.0 (0% to 100% power bar)
   public abilityCooldownTimer = 0;
   public potionCooldownTimer = 0;
   public dashCooldownTimer = 0;
@@ -236,6 +237,31 @@ export class PlayerController {
         : 0;
     const levelMult = (this.level - 1) * 0.02;
     return 1 + skillMult + trinketMult + levelMult;
+  }
+
+  /**
+   * Returns the damage multiplier based on current Weapon Power Bar percentage:
+   * - Under 50%: 0.25x
+   * - 50% to <80%: 0.75x
+   * - 80% to <100%: 1.0x
+   * - 100%: 2.0x
+   */
+  public getWeaponPowerMultiplier(power = this.weaponPower): number {
+    if (power >= 0.999) return 2.0;
+    if (power >= 0.8) return 1.0;
+    if (power >= 0.5) return 0.75;
+    return 0.25;
+  }
+
+  /**
+   * Consumes the current Weapon Power Bar (resetting it to 0) and returns the multiplier.
+   */
+  public consumeWeaponPower(): { multiplier: number; isMaxPower: boolean; pct: number } {
+    const pct = this.weaponPower;
+    const multiplier = this.getWeaponPowerMultiplier(pct);
+    const isMaxPower = pct >= 0.999;
+    this.weaponPower = 0;
+    return { multiplier, isMaxPower, pct };
   }
 
   public getMiningSpeedMultiplier(): number {
@@ -579,6 +605,11 @@ export class PlayerController {
     this.dashActiveTimer = Math.max(0, this.dashActiveTimer - dt);
     this.recallCooldownTimer = Math.max(0, this.recallCooldownTimer - dt);
     this.hurtInvulnTimer = Math.max(0, this.hurtInvulnTimer - dt);
+
+    // Rapidly recharge Weapon Power Bar when not attacking
+    const heldItem = this.getSelectedItemDef();
+    const powerChargeRate = heldItem?.attackSpeed ? Math.max(1.25, heldItem.attackSpeed * 0.82) : 1.55;
+    this.weaponPower = Math.min(1.0, this.weaponPower + powerChargeRate * dt);
 
     const armor = this.equippedArmorId ? ITEMS[this.equippedArmorId] : null;
     const trinket = this.equippedTrinketId ? ITEMS[this.equippedTrinketId] : null;

@@ -333,15 +333,11 @@ class AethelgardGame {
       return;
     }
 
-    // Melee swing check against monsters & bosses
-    if (this.player.attackCooldownTimer <= 0) {
-      const atkSpd = item?.attackSpeed || 1.8;
-      this.player.attackCooldownTimer = 1 / atkSpd;
-      if (item && (item.category === 'melee' || item.category === 'tool')) {
-        this.entities.performPlayerMeleeAttack(item);
-      } else {
-        this.entities.performPlayerMeleeAttack(ITEMS['flint_pickaxe']);
-      }
+    // Melee swing against monsters & bosses (damage scales with Weapon Power Bar: 0.25x / 0.75x / 1x / 2x!)
+    if (item && (item.category === 'melee' || item.category === 'tool')) {
+      this.entities.performPlayerMeleeAttack(item);
+    } else {
+      this.entities.performPlayerMeleeAttack(ITEMS['flint_pickaxe']);
     }
   }
 
@@ -434,12 +430,11 @@ class AethelgardGame {
     const blockDef = BLOCKS[hit.blockId];
 
     if (this.isLeftMouseDown && blockDef.hardness < 900) {
-      // Also allow continuous ranged firing or melee swinging if holding down LMB
-      if (held && held.category === 'ranged') {
+      // Allow auto-firing / auto-swinging at 100% power if holding down LMB
+      if (held && held.category === 'ranged' && this.player.weaponPower >= 0.999) {
         this.entities.performWeaponAbility(held);
-      } else if (held && held.category === 'melee' && this.player.attackCooldownTimer <= 0) {
+      } else if (held && held.category === 'melee' && this.player.weaponPower >= 0.999) {
         this.player.triggerSwing();
-        this.player.attackCooldownTimer = 1 / (held.attackSpeed || 1.8);
         this.entities.performPlayerMeleeAttack(held);
       }
 
