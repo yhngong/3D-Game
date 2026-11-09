@@ -45,6 +45,7 @@ export type ItemCategory =
   | 'melee'
   | 'ranged'
   | 'armor'
+  | 'trinket'
   | 'consumable'
   | 'boss_relic';
 
@@ -112,10 +113,13 @@ export interface ItemDef {
   critChance?: number;
   statusEffect?: 'poison' | 'chill' | 'burn' | 'void_weaken' | 'astral_mark';
   ability?: WeaponAbilityDef;
-  // Armor properties (full set item for streamlined equip)
+  // Armor & Trinket properties
   defense?: number;
   bonusMaxHp?: number;
   bonusMaxMana?: number;
+  bonusDamageMult?: number;
+  bonusRegen?: number;
+  dashCooldownMult?: number;
   speedMultiplier?: number;
   jumpBoost?: number;
   allowDoubleJump?: boolean;
@@ -261,4 +265,25 @@ export interface DroppedItemEntity {
   position: THREE.Vector3;
   velocity: THREE.Vector3;
   createdAt: number;
+}
+
+export type SkillId = 'vitality' | 'arcane' | 'might' | 'prospector' | 'agility';
+
+export interface SkillDef {
+  id: SkillId;
+  name: string;
+  icon: string;
+  color: string;
+  maxRank: number;
+  description: string;
+  perRankText: string;
+}
+
+export interface AchievementDef {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  xpReward: number;
+  tierColor: string;
 }

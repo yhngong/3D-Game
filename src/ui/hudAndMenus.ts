@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { sound } from '../audio/soundEngine';
-import { BLOCKS, BOSSES, ITEMS, TIER_NAMES } from '../data/itemsAndBlocks';
+import { ACHIEVEMENTS, BLOCKS, BOSSES, ITEMS, SKILLS, TIER_NAMES } from '../data/itemsAndBlocks';
 import { PROGRESSION_GUIDE, RECIPES } from '../data/recipes';
 import { EntityManager } from '../entities/monstersAndBosses';
 import { PlayerController } from '../entities/player';
 import { TextureAtlasManager } from '../graphics/textureAtlas';
-import { BlockId, ProgressionTier } from '../types';
+import { BlockId, ProgressionTier, SkillId } from '../types';
+
+export type ModalTabId = 'craft' | 'skills' | 'codex' | 'help';
 
 export class HudAndMenuManager {
   public player: PlayerController;
@@ -14,18 +16,33 @@ export class HudAndMenuManager {
 
   public isMenuOpen = false;
   public isWorldCreationOpen = false;
-  public activeTab: 'craft' | 'codex' | 'help' = 'craft';
+  public activeTab: ModalTabId = 'craft';
+
+  // Crafting & Inventory filters
   public selectedCraftTier: ProgressionTier | 0 = 0;
   public selectedCraftCategory = 'all';
+  public craftSearchQuery = '';
+  public craftableOnlyFilter = false;
+  public isTrashMode = false;
+
   private pendingWorldCheats = false;
 
+  private levelBadgeEl!: HTMLElement;
+  private skillAlertEl!: HTMLElement;
+  private xpFillEl!: HTMLElement;
+  private xpTextEl!: HTMLElement;
   private hpFillEl!: HTMLElement;
   private hpTextEl!: HTMLElement;
   private manaFillEl!: HTMLElement;
   private manaTextEl!: HTMLElement;
   private armorBadgeEl!: HTMLElement;
+  private trinketBadgeEl!: HTMLElement;
   private dashBadgeEl!: HTMLElement;
   private daylightBadgeEl!: HTMLElement;
+
+  private minimapCanvas!: HTMLCanvasElement;
+  private minimapCtx!: CanvasRenderingContext2D;
+  private minimapFrameCounter = 0;
 
   private bossBarContainer!: HTMLElement;
   private bossNameEl!: HTMLElement;
@@ -64,6 +81,20 @@ export class HudAndMenuManager {
     this.entities.onBannerNotification = (title, subtitle, color) => {
       this.showBanner(title, subtitle, color);
     };
+    this.player.onLevelUpCallback = (newLevel) => {
+      this.showBanner(
+        `LEVEL UP! HERO LEVEL ${newLevel}`,
+        '+1 Skill Point Unlocked! Press [K] to upgrade your Hero Perks.',
+        '#fde047'
+      );
+    };
+    this.player.onAchievementCallback = (ach) => {
+      this.showBanner(
+        `🏆 ACHIEVEMENT UNLOCKED: ${ach.title.toUpperCase()}`,
+        `${ach.description} (+${ach.xpReward} XP)`,
+        ach.tierColor
+      );
+    };
   }
 
   private buildDomStructure(): void {
@@ -80,7 +111,13 @@ export class HudAndMenuManager {
 
       <!-- Top-Left Player Status -->
       <div class="hud-panel player-stats-panel">
-        <div class="game-brand">AETHELGARD <span class="brand-sub">3D VOXEL REALMS</span></div>
+        <div class="brand-header-row">
+          <div class="game-brand">AETHELGARD <span class="brand-sub">ASTRAL FORGE</span></div>
+          <div class="level-pill-wrap">
+            <span id="level-badge" class="level-badge">LVL 1</span>
+            <span id="skill-alert-badge" class="skill-alert-badge" style="display:none;">+1 SP [K]</span>
+          </div>
+        </div>
         <div class="stat-bar-row">
           <span class="stat-label">HP</span>
           <div class="stat-bar-track">
@@ -95,9 +132,17 @@ export class HudAndMenuManager {
             <span id="mana-text" class="stat-bar-text">100 / 100</span>
           </div>
         </div>
+        <div class="stat-bar-row">
+          <span class="stat-label xp-label">XP</span>
+          <div class="stat-bar-track xp-track">
+            <div id="xp-fill" class="stat-bar-fill xp-fill"></div>
+            <span id="xp-text" class="stat-bar-text">0 / 100 XP</span>
+          </div>
+        </div>
         <div class="badges-row">
-          <span id="armor-badge" class="hud-badge">DEF: 12%</span>
-          <span id="dash-badge" class="hud-badge dash-ready">[Q] Dash Ready</span>
+          <span id="armor-badge" class="hud-badge">🛡️ DEF: 12%</span>
+          <span id="trinket-badge" class="hud-badge">💍 No Trinket</span>
+          <span id="dash-badge" class="hud-badge dash-ready">⚡ [Q] Dash</span>
           <span id="daylight-badge" class="hud-badge">☀️ Day (Safe)</span>
         </div>
       </div>
@@ -114,16 +159,27 @@ export class HudAndMenuManager {
         </div>
       </div>
 
-      <!-- Top-Right Progression & Biome Tracker -->
+      <!-- Top-Right Minimap Radar & Progression Tracker -->
       <div class="hud-panel progression-panel">
-        <div id="tracker-tier" class="tracker-tier">Tier I: Timber & Flint</div>
-        <div id="tracker-biome" class="tracker-biome">Biome: Verdant Groves</div>
-        <ul id="tracker-steps" class="tracker-steps"></ul>
+        <div class="radar-and-tier-row">
+          <div class="minimap-wrap" title="Real-Time Biome & Entity Radar (Center = You, Star = Sanctuary, Red = Monsters, Gold = Boss)">
+            <canvas id="minimap-canvas" width="124" height="124" class="minimap-canvas"></canvas>
+            <span class="minimap-compass">N</span>
+          </div>
+          <div class="tier-info-col">
+            <div id="tracker-tier" class="tracker-tier">Tier I: Timber & Flint</div>
+            <div id="tracker-biome" class="tracker-biome">Verdant Groves</div>
+            <ul id="tracker-steps" class="tracker-steps"></ul>
+          </div>
+        </div>
         <div class="tracker-keys">
           <span><kbd>E</kbd> Forge & Bag</span>
-          <span><kbd>P</kbd> Boss Codex</span>
+          <span><kbd>K</kbd> Skills</span>
+          <span><kbd>X</kbd> Dispose Item</span>
+          <span><kbd>B</kbd> Recall</span>
+          <span><kbd>V</kbd> 1st/3rd Cam</span>
+          <span><kbd>P</kbd> Codex</span>
           <span id="key-hint-daylight" style="display:none;"><kbd>T</kbd> Day/Night</span>
-          <span><kbd>RMB</kbd> Ability / Place</span>
         </div>
       </div>
 
@@ -137,16 +193,24 @@ export class HudAndMenuManager {
       <div class="bottom-hud-wrap">
         <div id="item-tooltip" class="item-tooltip"></div>
         <div id="hotbar-container" class="hotbar-container"></div>
+        <div class="bottom-quick-bar">
+          <span><kbd>LMB</kbd> Attack / Mine</span>
+          <span><kbd>RMB</kbd> Ability / Place / Use</span>
+          <span><kbd>X</kbd> Dispose Held Item (+XP)</span>
+          <span><kbd>Shift+X</kbd> Dispose Stack</span>
+          <span><kbd>Q</kbd> Dash</span>
+        </div>
       </div>
 
-      <!-- Fullscreen Modal Menu (Crafting, Inventory, Progression & Boss Codex) -->
+      <!-- Fullscreen Modal Menu (Crafting, Inventory/Incinerator, Skills, Boss Codex, Controls) -->
       <div id="modal-overlay" class="modal-overlay" style="display:none;">
         <div class="modal-window">
           <div class="modal-header">
             <div class="modal-tabs">
-              <button id="tab-btn-craft" class="modal-tab active">Astral Forge & Inventory [E]</button>
-              <button id="tab-btn-codex" class="modal-tab">6-Tier Progression & Boss Codex [P]</button>
-              <button id="tab-btn-help" class="modal-tab">Controls & World Settings</button>
+              <button id="tab-btn-craft" class="modal-tab active">🔨 Forge, Bag & Incinerator [E]</button>
+              <button id="tab-btn-skills" class="modal-tab">🌟 Hero Skills & Achievements [K]</button>
+              <button id="tab-btn-codex" class="modal-tab">📜 6-Tier & Boss Codex [P]</button>
+              <button id="tab-btn-help" class="modal-tab">⚙️ Controls & World</button>
             </div>
             <button id="modal-close-btn" class="modal-close-btn">Resume Game [ESC]</button>
           </div>
@@ -158,13 +222,21 @@ export class HudAndMenuManager {
       <div id="world-create-overlay" class="modal-overlay" style="display:none;"></div>
     `;
 
+    this.levelBadgeEl = document.getElementById('level-badge')!;
+    this.skillAlertEl = document.getElementById('skill-alert-badge')!;
+    this.xpFillEl = document.getElementById('xp-fill')!;
+    this.xpTextEl = document.getElementById('xp-text')!;
     this.hpFillEl = document.getElementById('hp-fill')!;
     this.hpTextEl = document.getElementById('hp-text')!;
     this.manaFillEl = document.getElementById('mana-fill')!;
     this.manaTextEl = document.getElementById('mana-text')!;
     this.armorBadgeEl = document.getElementById('armor-badge')!;
+    this.trinketBadgeEl = document.getElementById('trinket-badge')!;
     this.dashBadgeEl = document.getElementById('dash-badge')!;
     this.daylightBadgeEl = document.getElementById('daylight-badge')!;
+
+    this.minimapCanvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
+    this.minimapCtx = this.minimapCanvas.getContext('2d')!;
 
     this.bossBarContainer = document.getElementById('boss-bar-container')!;
     this.bossNameEl = document.getElementById('boss-name')!;
@@ -191,6 +263,9 @@ export class HudAndMenuManager {
 
     document.getElementById('tab-btn-craft')!.addEventListener('click', () => {
       this.switchTab('craft');
+    });
+    document.getElementById('tab-btn-skills')!.addEventListener('click', () => {
+      this.switchTab('skills');
     });
     document.getElementById('tab-btn-codex')!.addEventListener('click', () => {
       this.switchTab('codex');
@@ -222,7 +297,7 @@ export class HudAndMenuManager {
     this.worldCreateOverlay.innerHTML = `
       <div class="world-create-card">
         <div class="world-create-title">AETHELGARD: REALMS OF THE ASTRAL FORGE</div>
-        <div class="world-create-sub">3D Voxel Sandbox Action-RPG • 6 Custom Tiers • 5 Multi-Phase Bosses</div>
+        <div class="world-create-sub">3D Voxel Action-RPG • 6 Custom Tiers • 5 Multi-Phase Bosses • Hero Skill Tree</div>
 
         ${
           hasSave
@@ -231,7 +306,7 @@ export class HudAndMenuManager {
             <div>
               <div class="saved-world-name">Saved World: ${this.player.worldName}</div>
               <div class="saved-world-meta">
-                Tier ${this.player.unlockedTier} • Seed: ${this.player.world.seed} • Cheats: 
+                Hero Lv.${this.player.level} • Tier ${this.player.unlockedTier} • Seed: ${this.player.world.seed} • Cheats: 
                 <strong style="color:${this.player.cheatsEnabled ? '#4ade80' : '#f87171'}">
                   ${this.player.cheatsEnabled ? 'ENABLED' : 'DISABLED (Survival)'}
                 </strong>
@@ -257,7 +332,7 @@ export class HudAndMenuManager {
             </div>
           </div>
           <div class="world-field">
-            <label>Allow Cheats (Grant Items & Instant Boss Summons)</label>
+            <label>Allow Cheats (Grant Items, Instant Boss Summons & Daylight Changer [T])</label>
             <button id="toggle-world-cheats-btn" type="button" class="cheats-toggle-btn ${
               this.pendingWorldCheats ? 'on' : 'off'
             }">
@@ -266,8 +341,8 @@ export class HudAndMenuManager {
             <div class="cheats-hint">
               ${
                 this.pendingWorldCheats
-                  ? '⚡ You will be able to grant yourself any Item, Tier Gear Kit, or summon Bosses directly from the Codex [P].'
-                  : '🔒 You cannot grant yourself items. All weapons, armor, and Boss Relics must be mined and forged legitimately!'
+                  ? '⚡ You will be able to grant yourself any Item, Tier Gear Kit, toggle Day/Night with [T], or summon Bosses from the Codex [P].'
+                  : '🔒 Cheats & Daylight Changer [T] are locked. All weapons, armor, trinkets, and Boss Relics must be mined and forged legitimately!'
               }
             </div>
           </div>
@@ -324,14 +399,14 @@ export class HudAndMenuManager {
       this.showBanner(
         `WELCOME TO ${this.player.worldName.toUpperCase()}`,
         this.player.cheatsEnabled
-          ? 'Cheats Enabled — Open Codex [P] anytime to grant items or gear!'
-          : 'Survival Mode (Cheats OFF) — Mine ores & forge gear at [E]!',
+          ? 'Cheats Enabled — Open Codex [P] to grant items or press [T] to change Daylight!'
+          : 'Survival Mode — Mine ores, level up skills [K], and forge mythic gear [E]!',
         this.player.cheatsEnabled ? '#4ade80' : '#38bdf8'
       );
     });
   }
 
-  public toggleMenu(forceState?: boolean, tab?: 'craft' | 'codex' | 'help'): void {
+  public toggleMenu(forceState?: boolean, tab?: ModalTabId): void {
     if (this.isWorldCreationOpen) return;
     this.isMenuOpen = forceState !== undefined ? forceState : !this.isMenuOpen;
     if (tab) this.activeTab = tab;
@@ -347,9 +422,10 @@ export class HudAndMenuManager {
     }
   }
 
-  public switchTab(tab: 'craft' | 'codex' | 'help'): void {
+  public switchTab(tab: ModalTabId): void {
     this.activeTab = tab;
     document.getElementById('tab-btn-craft')!.classList.toggle('active', tab === 'craft');
+    document.getElementById('tab-btn-skills')!.classList.toggle('active', tab === 'skills');
     document.getElementById('tab-btn-codex')!.classList.toggle('active', tab === 'codex');
     document.getElementById('tab-btn-help')!.classList.toggle('active', tab === 'help');
     this.renderModalContent();
@@ -361,7 +437,20 @@ export class HudAndMenuManager {
     isNightTime = false,
     timeOfDay = 0.25
   ): void {
-    // Player HP / MP / Armor / Dash / Daylight Cycle
+    // Level & XP Bar
+    this.levelBadgeEl.textContent = `LVL ${this.player.level}`;
+    if (this.player.skillPoints > 0) {
+      this.skillAlertEl.style.display = 'inline-block';
+      this.skillAlertEl.textContent = `+${this.player.skillPoints} SP [K]`;
+    } else {
+      this.skillAlertEl.style.display = 'none';
+    }
+
+    const xpPct = Math.max(0, Math.min(100, (this.player.xp / this.player.xpToNext) * 100));
+    this.xpFillEl.style.width = `${xpPct}%`;
+    this.xpTextEl.textContent = `${this.player.xp} / ${this.player.xpToNext} XP`;
+
+    // Player HP / MP / Armor / Trinket / Dash / Daylight Cycle
     const hpPct = Math.max(0, Math.min(100, (this.player.hp / this.player.maxHp) * 100));
     this.hpFillEl.style.width = `${hpPct}%`;
     this.hpTextEl.textContent = `${Math.ceil(this.player.hp)} / ${this.player.maxHp}`;
@@ -371,26 +460,29 @@ export class HudAndMenuManager {
     this.manaTextEl.textContent = `${Math.floor(this.player.mana)} / ${this.player.maxMana}`;
 
     const armorDef = this.player.equippedArmorId ? ITEMS[this.player.equippedArmorId] : null;
-    this.armorBadgeEl.textContent = `DEF: ${this.player.defense}% (${armorDef ? armorDef.name : 'Unarmored'})`;
+    this.armorBadgeEl.textContent = `🛡️ DEF: ${this.player.defense}% (${armorDef ? armorDef.name.split(' ')[0] : 'None'})`;
+
+    const trinketDef = this.player.equippedTrinketId ? ITEMS[this.player.equippedTrinketId] : null;
+    this.trinketBadgeEl.textContent = trinketDef ? `💍 ${trinketDef.name.split(' ')[0]}` : '💍 No Trinket';
 
     if (this.player.dashCooldownTimer <= 0) {
-      this.dashBadgeEl.textContent = '[Q] Shadow Dash: READY';
+      this.dashBadgeEl.textContent = '⚡ [Q] Dash: READY';
       this.dashBadgeEl.className = 'hud-badge dash-ready';
     } else {
-      this.dashBadgeEl.textContent = `[Q] Dash: ${this.player.dashCooldownTimer.toFixed(1)}s`;
+      this.dashBadgeEl.textContent = `⚡ [Q] ${this.player.dashCooldownTimer.toFixed(1)}s`;
       this.dashBadgeEl.className = 'hud-badge';
     }
 
-    // Format 24-hour clock from timeOfDay (0 = 6:00 AM, 0.25 = 12:00 PM, 0.5 = 6:00 PM, 0.75 = 12:00 AM)
-    const totalHours = Math.floor(((timeOfDay * 24 + 6) % 24));
+    // Format 24-hour clock from timeOfDay
+    const totalHours = Math.floor((timeOfDay * 24 + 6) % 24);
     const displayHour = totalHours % 12 === 0 ? 12 : totalHours % 12;
     const amPm = totalHours >= 12 ? 'PM' : 'AM';
     if (isNightTime) {
-      this.daylightBadgeEl.textContent = `🌙 Night (${displayHour}:00 ${amPm}) — Monsters Spawning!`;
+      this.daylightBadgeEl.textContent = `🌙 ${displayHour}:00 ${amPm} (Night)`;
       this.daylightBadgeEl.style.borderColor = '#c084fc';
       this.daylightBadgeEl.style.color = '#e9d5ff';
     } else {
-      this.daylightBadgeEl.textContent = `☀️ Day (${displayHour}:00 ${amPm}) — Safe`;
+      this.daylightBadgeEl.textContent = `☀️ ${displayHour}:00 ${amPm} (Day)`;
       this.daylightBadgeEl.style.borderColor = '#fde047';
       this.daylightBadgeEl.style.color = '#fef08a';
     }
@@ -431,9 +523,9 @@ export class HudAndMenuManager {
     this.trackerTierEl.style.color = tierMeta.color;
 
     const biome = this.player.world.getBiomeAt(this.player.position.x, this.player.position.z);
-    this.trackerBiomeEl.textContent = `Biome: ${this.player.world.getBiomeDisplayName(biome)} | Pos: ${Math.floor(
+    this.trackerBiomeEl.textContent = `${this.player.world.getBiomeDisplayName(biome)} (${Math.floor(
       this.player.position.x
-    )}, ${Math.floor(this.player.position.y)}, ${Math.floor(this.player.position.z)}`;
+    )}, ${Math.floor(this.player.position.y)}, ${Math.floor(this.player.position.z)})`;
 
     const guide = PROGRESSION_GUIDE[this.player.unlockedTier];
     this.trackerStepsEl.innerHTML = guide.steps.map((s) => `<li>${s}</li>`).join('');
@@ -442,6 +534,103 @@ export class HudAndMenuManager {
     if (dayHintEl) {
       dayHintEl.style.display = this.player.cheatsEnabled ? 'inline' : 'none';
     }
+
+    // Update Minimap Radar every 3 frames for smooth 60fps performance
+    this.minimapFrameCounter++;
+    if (this.minimapFrameCounter % 3 === 0) {
+      this.renderMinimapRadar();
+    }
+  }
+
+  private renderMinimapRadar(): void {
+    const ctx = this.minimapCtx;
+    const w = this.minimapCanvas.width;
+    const h = this.minimapCanvas.height;
+    const cx = w / 2;
+    const cy = h / 2;
+    const px = this.player.position.x;
+    const pz = this.player.position.z;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Draw biome terrain grid (step = 4px = 3 world blocks)
+    const step = 4;
+    const scale = 0.75; // blocks per pixel
+    for (let sy = 0; sy < h; sy += step) {
+      for (let sx = 0; sx < w; sx += step) {
+        const wx = px + (sx - cx) * scale;
+        const wz = pz + (sy - cy) * scale;
+        const distFromSpawn = Math.hypot(wx - 6, wz - 6);
+        if (distFromSpawn < 8.5) {
+          ctx.fillStyle = '#1e3a8a';
+        } else {
+          const b = this.player.world.getBiomeAt(wx, wz);
+          if (b === 'verdant_groves') ctx.fillStyle = '#14532d';
+          else if (b === 'permafrost_peaks') ctx.fillStyle = '#0c4a6e';
+          else if (b === 'scorched_wastes') ctx.fillStyle = '#451a03';
+          else ctx.fillStyle = '#2e1065';
+        }
+        ctx.fillRect(sx, sy, step, step);
+      }
+    }
+
+    // Radar range rings
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 28, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 52, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Spawn Sanctuary Star Marker
+    const sancX = cx + (6.5 - px) / scale;
+    const sancY = cy + (6.5 - pz) / scale;
+    if (sancX >= 4 && sancX <= w - 4 && sancY >= 4 && sancY <= h - 4) {
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.arc(sancX, sancY, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Active Monsters (red dots)
+    ctx.fillStyle = '#f87171';
+    for (const m of this.entities.monsters) {
+      const mx = cx + (m.position.x - px) / scale;
+      const my = cy + (m.position.z - pz) / scale;
+      if (mx >= 3 && mx <= w - 3 && my >= 3 && my <= h - 3) {
+        ctx.beginPath();
+        ctx.arc(mx, my, 2.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Active Boss (pulsing gold beacon)
+    if (this.entities.activeBoss) {
+      const b = this.entities.activeBoss;
+      const bx = Math.max(6, Math.min(w - 6, cx + (b.position.x - px) / scale));
+      const by = Math.max(6, Math.min(h - 6, cy + (b.position.z - pz) / scale));
+      ctx.fillStyle = '#fde047';
+      ctx.beginPath();
+      ctx.arc(bx, by, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // Player Directional Arrow at Center
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(-this.player.yaw);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(0, -6);
+    ctx.lineTo(4.5, 5);
+    ctx.lineTo(0, 2.5);
+    ctx.lineTo(-4.5, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   }
 
   public renderHotbar(): void {
@@ -482,7 +671,10 @@ export class HudAndMenuManager {
     if (sel) {
       const tierColor = TIER_NAMES[sel.tier].color;
       const stats: string[] = [];
-      if (sel.damage) stats.push(`⚔️ ${sel.damage} DMG`);
+      if (sel.damage) {
+        const boostedDmg = Math.round(sel.damage * this.player.getDamageMultiplier());
+        stats.push(`⚔️ ${boostedDmg} DMG`);
+      }
       if (sel.toolTier) stats.push(`⛏️ Mining Tier ${sel.toolTier} (${sel.miningSpeed}x)`);
       if (sel.healHp) stats.push(`💚 +${sel.healHp} HP / +${sel.healMana} MP`);
       const abilityInfo = sel.ability ? `<div class="tooltip-ability">✨ ${sel.ability.description}</div>` : '';
@@ -502,6 +694,8 @@ export class HudAndMenuManager {
   private renderModalContent(): void {
     if (this.activeTab === 'craft') {
       this.renderCraftingAndInventoryTab();
+    } else if (this.activeTab === 'skills') {
+      this.renderSkillsAndAchievementsTab();
     } else if (this.activeTab === 'codex') {
       this.renderCodexTab();
     } else {
@@ -510,29 +704,39 @@ export class HudAndMenuManager {
   }
 
   private renderCraftingAndInventoryTab(): void {
+    const query = this.craftSearchQuery.trim().toLowerCase();
     const filteredRecipes = RECIPES.filter((r) => {
       if (this.selectedCraftTier !== 0 && r.tier !== this.selectedCraftTier) return false;
       if (this.selectedCraftCategory !== 'all' && r.category !== this.selectedCraftCategory) return false;
+      if (this.craftableOnlyFilter && !this.player.canCraft(r)) return false;
+      if (query) {
+        const resItem = ITEMS[r.resultItemId];
+        const matchName = resItem.name.toLowerCase().includes(query);
+        const matchDesc = resItem.description.toLowerCase().includes(query);
+        if (!matchName && !matchDesc) return false;
+      }
       return true;
     });
 
-    const recipesHtml = filteredRecipes
-      .map((r) => {
-        const resItem = ITEMS[r.resultItemId];
-        const canMake = this.player.canCraft(r);
-        const iconUrl = this.atlas.getItemIconDataUrl(r.resultItemId);
-        const tierMeta = TIER_NAMES[r.tier];
+    const recipesHtml =
+      filteredRecipes.length > 0
+        ? filteredRecipes
+            .map((r) => {
+              const resItem = ITEMS[r.resultItemId];
+              const canMake = this.player.canCraft(r);
+              const iconUrl = this.atlas.getItemIconDataUrl(r.resultItemId);
+              const tierMeta = TIER_NAMES[r.tier];
 
-        const ingsHtml = r.ingredients
-          .map((ing) => {
-            const have = this.player.getItemCount(ing.itemId);
-            const ingDef = ITEMS[ing.itemId];
-            const ok = have >= ing.count;
-            return `<span class="ing-pill ${ok ? 'ing-ok' : 'ing-missing'}">${ingDef.name}: ${have}/${ing.count}</span>`;
-          })
-          .join('');
+              const ingsHtml = r.ingredients
+                .map((ing) => {
+                  const have = this.player.getItemCount(ing.itemId);
+                  const ingDef = ITEMS[ing.itemId];
+                  const ok = have >= ing.count;
+                  return `<span class="ing-pill ${ok ? 'ing-ok' : 'ing-missing'}">${ingDef.name}: ${have}/${ing.count}</span>`;
+                })
+                .join('');
 
-        return `
+              return `
           <div class="recipe-card ${canMake ? 'craftable' : ''}">
             <div class="recipe-card-left">
               <img src="${iconUrl}" class="recipe-icon" alt="${resItem.name}" />
@@ -550,8 +754,9 @@ export class HudAndMenuManager {
             </button>
           </div>
         `;
-      })
-      .join('');
+            })
+            .join('')
+        : `<div class="empty-recipes-msg">No recipes match your current filter. Try clearing the search or unchecking "Craftable Only".</div>`;
 
     // Inventory Grid (Hotbar 0..8 + Backpack 9..35)
     let invGridHtml = '';
@@ -560,9 +765,16 @@ export class HudAndMenuManager {
       const itemDef = slot ? ITEMS[slot.itemId] : null;
       const iconUrl = slot ? this.atlas.getItemIconDataUrl(slot.itemId) : '';
       const isHotbar = i < 9;
+      const isActiveHotbar = i === this.player.selectedHotbarIndex;
       invGridHtml += `
-        <div class="inv-cell ${isHotbar ? 'inv-hotbar-cell' : ''}" data-inv-index="${i}" title="${
-        itemDef ? `${itemDef.name}: ${itemDef.description}` : 'Empty Slot'
+        <div class="inv-cell ${isHotbar ? 'inv-hotbar-cell' : ''} ${isActiveHotbar ? 'inv-active-slot' : ''} ${
+        this.isTrashMode && slot ? 'inv-trash-hover' : ''
+      }" data-inv-index="${i}" title="${
+        itemDef
+          ? `${itemDef.name} (x${slot!.count})\n${itemDef.description}\n\n• Left-Click: ${
+              this.isTrashMode ? '🔥 DISPOSE / INCINERATE FOR XP' : 'Equip or Swap with Hotbar'
+            }\n• Right-Click: 🔥 Dispose / Incinerate for +${itemDef.tier * 6 * slot!.count} XP`
+          : 'Empty Slot'
       }">
           ${isHotbar ? `<span class="inv-cell-num">${i + 1}</span>` : ''}
           ${
@@ -578,10 +790,23 @@ export class HudAndMenuManager {
     const armorDef = this.player.equippedArmorId ? ITEMS[this.player.equippedArmorId] : null;
     const armorIcon = this.player.equippedArmorId ? this.atlas.getItemIconDataUrl(this.player.equippedArmorId) : '';
 
+    const trinketDef = this.player.equippedTrinketId ? ITEMS[this.player.equippedTrinketId] : null;
+    const trinketIcon = this.player.equippedTrinketId ? this.atlas.getItemIconDataUrl(this.player.equippedTrinketId) : '';
+
+    const activeSlot = this.player.getSelectedSlot();
+    const activeItemDef = this.player.getSelectedItemDef();
+
     this.modalContent.innerHTML = `
       <div class="craft-layout">
         <!-- Left: Crafting & Smelting Recipes -->
         <div class="craft-column">
+          <div class="filter-bar">
+            <input id="craft-search-input" type="text" placeholder="🔍 Search weapons, armor, trinkets, blocks..." value="${this.craftSearchQuery}" class="world-input search-input" />
+            <label class="craftable-checkbox-label">
+              <input id="craft-ready-checkbox" type="checkbox" ${this.craftableOnlyFilter ? 'checked' : ''} />
+              Craftable Now
+            </label>
+          </div>
           <div class="filter-bar">
             <select id="craft-tier-filter" class="modal-select">
               <option value="0" ${this.selectedCraftTier === 0 ? 'selected' : ''}>All 6 Tiers</option>
@@ -594,34 +819,89 @@ export class HudAndMenuManager {
             </select>
             <select id="craft-cat-filter" class="modal-select">
               <option value="all" ${this.selectedCraftCategory === 'all' ? 'selected' : ''}>All Categories</option>
-              <option value="melee" ${this.selectedCraftCategory === 'melee' ? 'selected' : ''}>Melee Weapons</option>
-              <option value="ranged" ${this.selectedCraftCategory === 'ranged' ? 'selected' : ''}>Ranged & Magic</option>
-              <option value="tool" ${this.selectedCraftCategory === 'tool' ? 'selected' : ''}>Pickaxes & Axes</option>
-              <option value="armor" ${this.selectedCraftCategory === 'armor' ? 'selected' : ''}>Armor Sets</option>
-              <option value="boss_relic" ${this.selectedCraftCategory === 'boss_relic' ? 'selected' : ''}>Boss Summon Relics</option>
-              <option value="material" ${this.selectedCraftCategory === 'material' ? 'selected' : ''}>Ingots & Materials</option>
-              <option value="block" ${this.selectedCraftCategory === 'block' ? 'selected' : ''}>Blocks & Forges</option>
+              <option value="melee" ${this.selectedCraftCategory === 'melee' ? 'selected' : ''}>⚔️ Melee Weapons</option>
+              <option value="ranged" ${this.selectedCraftCategory === 'ranged' ? 'selected' : ''}>🏹 Ranged & Magic</option>
+              <option value="armor" ${this.selectedCraftCategory === 'armor' ? 'selected' : ''}>🛡️ Armor Sets</option>
+              <option value="trinket" ${this.selectedCraftCategory === 'trinket' ? 'selected' : ''}>💍 Mythic Trinkets</option>
+              <option value="tool" ${this.selectedCraftCategory === 'tool' ? 'selected' : ''}>⛏️ Pickaxes & Axes</option>
+              <option value="boss_relic" ${this.selectedCraftCategory === 'boss_relic' ? 'selected' : ''}>💀 Boss Summon Relics</option>
+              <option value="material" ${this.selectedCraftCategory === 'material' ? 'selected' : ''}>💎 Ingots & Materials</option>
+              <option value="block" ${this.selectedCraftCategory === 'block' ? 'selected' : ''}>🧱 Blocks & Forges</option>
             </select>
           </div>
           <div class="recipe-list">${recipesHtml}</div>
         </div>
 
-        <!-- Right: Equipped Armor & 36-Slot Inventory -->
+        <!-- Right: Equipped Loadout, Void Incinerator (Item Disposal), & 36-Slot Inventory -->
         <div class="inventory-column">
-          <div class="equipped-armor-box">
-            ${armorIcon ? `<img src="${armorIcon}" class="armor-box-icon" />` : ''}
-            <div>
-              <div class="armor-box-title">Equipped Armor: ${armorDef ? armorDef.name : 'None'}</div>
-              <div class="armor-box-bonus">${armorDef?.setBonusText || 'Craft an Armor Set to gain Defense, Max HP & Double-Jump/Flight!'}</div>
+          <!-- Equipped Armor & Trinket Loadout -->
+          <div class="equipment-loadout-grid">
+            <div class="equipped-armor-box">
+              ${armorIcon ? `<img src="${armorIcon}" class="armor-box-icon" />` : `<div class="empty-equip-icon">🛡️</div>`}
+              <div>
+                <div class="armor-box-title">Armor: ${armorDef ? armorDef.name : 'None'}</div>
+                <div class="armor-box-bonus">${armorDef?.setBonusText || 'Craft an Armor Set for Defense & Double-Jump!'}</div>
+              </div>
+            </div>
+            <div class="equipped-armor-box trinket-box">
+              ${trinketIcon ? `<img src="${trinketIcon}" class="armor-box-icon" />` : `<div class="empty-equip-icon">💍</div>`}
+              <div>
+                <div class="armor-box-title">Trinket: ${trinketDef ? trinketDef.name : 'None Equipped'}</div>
+                <div class="armor-box-bonus">${trinketDef?.setBonusText || 'Craft a Mythic Trinket for Damage, Speed & Regen!'}</div>
+              </div>
             </div>
           </div>
-          <div class="inv-help-note">Click any item in your Backpack to swap it with your active Hotbar slot (#${
-            this.player.selectedHotbarIndex + 1
-          }), or click an Armor Set to equip it!</div>
+
+          <!-- Hero Combat Summary Strip -->
+          <div class="hero-stat-strip">
+            <span>⚔️ DMG Bonus: <strong>+${Math.round((this.player.getDamageMultiplier() - 1) * 100)}%</strong></span>
+            <span>⛏️ Mine Speed: <strong>+${Math.round((this.player.getMiningSpeedMultiplier() - 1) * 100)}%</strong></span>
+            <span>🛡️ Defense: <strong>${this.player.defense}%</strong></span>
+            <span>⚡ Dash CD: <strong>${this.player.getDashCooldownDuration().toFixed(2)}s</strong></span>
+          </div>
+
+          <!-- Void Incinerator / Item Disposal Controls -->
+          <div class="incinerator-panel ${this.isTrashMode ? 'active' : ''}">
+            <div class="incinerator-header">
+              <div>
+                <div class="incinerator-title">🔥 Void Incinerator & Item Disposal</div>
+                <div class="incinerator-sub">
+                  <strong>Right-click any slot</strong> (or toggle Trash Mode below) to dispose of unwanted items for <strong>Bonus XP & Mana</strong>! In-game hotkey: <kbd>X</kbd>.
+                </div>
+              </div>
+            </div>
+            <div class="incinerator-actions">
+              <button id="toggle-trash-mode-btn" type="button" class="incinerator-btn ${this.isTrashMode ? 'trash-on' : ''}">
+                ${this.isTrashMode ? '🔥 Trash Mode: ON (Click Any Slot to Dispose)' : '🗑️ Toggle Trash Mode: OFF'}
+              </button>
+              <button id="dispose-selected-btn" type="button" class="incinerator-btn" ${!activeSlot ? 'disabled' : ''}>
+                🔥 Dispose Held Slot #${this.player.selectedHotbarIndex + 1} (${activeItemDef ? activeItemDef.name : 'Empty'})
+              </button>
+              <button id="sort-inventory-btn" type="button" class="incinerator-btn sort-btn">
+                ✨ Sort & Stack Bag
+              </button>
+            </div>
+          </div>
+
           <div class="inv-grid">${invGridHtml}</div>
         </div>
       </div>
     `;
+
+    const searchInput = document.getElementById('craft-search-input') as HTMLInputElement;
+    searchInput.addEventListener('input', (e) => {
+      this.craftSearchQuery = (e.target as HTMLInputElement).value;
+      const pos = searchInput.selectionStart || 0;
+      this.renderCraftingAndInventoryTab();
+      const newSearch = document.getElementById('craft-search-input') as HTMLInputElement;
+      newSearch.focus();
+      newSearch.setSelectionRange(pos, pos);
+    });
+
+    document.getElementById('craft-ready-checkbox')!.addEventListener('change', (e) => {
+      this.craftableOnlyFilter = (e.target as HTMLInputElement).checked;
+      this.renderCraftingAndInventoryTab();
+    });
 
     document.getElementById('craft-tier-filter')!.addEventListener('change', (e) => {
       this.selectedCraftTier = Number((e.target as HTMLSelectElement).value) as ProgressionTier | 0;
@@ -629,6 +909,30 @@ export class HudAndMenuManager {
     });
     document.getElementById('craft-cat-filter')!.addEventListener('change', (e) => {
       this.selectedCraftCategory = (e.target as HTMLSelectElement).value;
+      this.renderCraftingAndInventoryTab();
+    });
+
+    document.getElementById('toggle-trash-mode-btn')!.addEventListener('click', () => {
+      this.isTrashMode = !this.isTrashMode;
+      this.renderCraftingAndInventoryTab();
+    });
+
+    document.getElementById('dispose-selected-btn')!.addEventListener('click', () => {
+      const res = this.player.disposeHeldItem(true);
+      if (res) {
+        this.renderHotbar();
+        this.renderCraftingAndInventoryTab();
+        this.showBanner(
+          '🔥 ITEM INCINERATED',
+          `Disposed ${res.count}x ${res.itemName} for +${res.xpGained} XP!`,
+          '#c084fc'
+        );
+      }
+    });
+
+    document.getElementById('sort-inventory-btn')!.addEventListener('click', () => {
+      this.player.sortAndStackInventory();
+      this.renderHotbar();
       this.renderCraftingAndInventoryTab();
     });
 
@@ -644,15 +948,47 @@ export class HudAndMenuManager {
     });
 
     this.modalContent.querySelectorAll('.inv-cell').forEach((cell) => {
+      // Right-click any slot to immediately dispose/incinerate it!
+      cell.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const idx = Number((cell as HTMLElement).dataset.invIndex);
+        const res = this.player.disposeSlotItem(idx, true);
+        if (res) {
+          this.renderHotbar();
+          this.renderCraftingAndInventoryTab();
+        }
+      });
+
       cell.addEventListener('click', () => {
         const idx = Number((cell as HTMLElement).dataset.invIndex);
         const slot = this.player.inventory[idx];
+
+        // If Trash Mode is ON, clicking disposes the slot!
+        if (this.isTrashMode && slot) {
+          const res = this.player.disposeSlotItem(idx, true);
+          if (res) {
+            this.renderHotbar();
+            this.renderCraftingAndInventoryTab();
+          }
+          return;
+        }
+
         if (slot) {
           const def = ITEMS[slot.itemId];
           if (def.category === 'armor') {
             const prevArmor = this.player.equippedArmorId;
             this.player.equippedArmorId = def.id;
             this.player.inventory[idx] = prevArmor ? { itemId: prevArmor, count: 1 } : null;
+            this.player.recalculateStats();
+            sound.playPickup();
+            this.renderHotbar();
+            this.renderCraftingAndInventoryTab();
+            return;
+          }
+          if (def.category === 'trinket') {
+            const prevTrinket = this.player.equippedTrinketId;
+            this.player.equippedTrinketId = def.id;
+            this.player.inventory[idx] = prevTrinket ? { itemId: prevTrinket, count: 1 } : null;
             this.player.recalculateStats();
             sound.playPickup();
             this.renderHotbar();
@@ -669,6 +1005,100 @@ export class HudAndMenuManager {
           this.player.savePlayerState();
           this.renderHotbar();
           this.renderCraftingAndInventoryTab();
+        }
+      });
+    });
+  }
+
+  private renderSkillsAndAchievementsTab(): void {
+    const skillsHtml = SKILLS.map((s) => {
+      const rank = this.player.skills[s.id] || 0;
+      const isMax = rank >= s.maxRank;
+      const canUpgrade = this.player.skillPoints > 0 && !isMax;
+      const pct = (rank / s.maxRank) * 100;
+
+      return `
+        <div class="skill-card" style="border-left: 4px solid ${s.color}">
+          <div class="skill-card-top">
+            <div class="skill-icon-box" style="background:${s.color}22; border-color:${s.color}">
+              <span>${s.icon}</span>
+            </div>
+            <div class="skill-info">
+              <div class="skill-name-row">
+                <span class="skill-title" style="color:${s.color}">${s.name}</span>
+                <span class="skill-rank-pill">Rank ${rank} / ${s.maxRank}</span>
+              </div>
+              <div class="skill-desc">${s.description}</div>
+              <div class="skill-bar-track">
+                <div class="skill-bar-fill" style="width:${pct}%; background:${s.color}"></div>
+              </div>
+            </div>
+            <button class="craft-btn ${canUpgrade ? 'ready' : 'disabled'} skill-up-btn" data-skill-id="${s.id}" ${
+        !canUpgrade ? 'disabled' : ''
+      }>
+              ${isMax ? 'MAX RANK' : 'Upgrade (1 SP)'}
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const achHtml = ACHIEVEMENTS.map((a) => {
+      const unlocked = this.player.unlockedAchievements.has(a.id);
+      return `
+        <div class="ach-card ${unlocked ? 'unlocked' : 'locked'}" style="border-color:${
+        unlocked ? a.tierColor : 'rgba(148,163,184,0.2)'
+      }">
+          <div class="ach-icon">${unlocked ? a.icon : '🔒'}</div>
+          <div>
+            <div class="ach-title" style="color:${unlocked ? a.tierColor : '#94a3b8'}">
+              ${a.title} ${unlocked ? '<span class="ach-done-badge">✓ UNLOCKED</span>' : ''}
+            </div>
+            <div class="ach-desc">${a.description}</div>
+            <div class="ach-reward">Reward: +${a.xpReward} Hero XP</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    this.modalContent.innerHTML = `
+      <div class="skills-layout">
+        <div class="skills-col">
+          <div class="skills-banner">
+            <div>
+              <div class="skills-hero-lvl">Hero Level ${this.player.level} (${this.player.xp} / ${
+      this.player.xpToNext
+    } XP)</div>
+              <div class="skills-hero-sub">Earn XP by mining ores, forging gear, slaying monsters, and incinerating unwanted items!</div>
+            </div>
+            <div class="sp-counter-box">
+              <span class="sp-num">${this.player.skillPoints}</span>
+              <span class="sp-label">Available Skill Points</span>
+            </div>
+          </div>
+          <div class="skills-list">${skillsHtml}</div>
+        </div>
+
+        <div class="ach-col">
+          <div class="ach-header">
+            🏆 Realm Achievements (${this.player.unlockedAchievements.size} / ${ACHIEVEMENTS.length} Unlocked)
+          </div>
+          <div class="ach-stats-row">
+            <span>⛏️ Blocks Mined: <strong>${this.player.blocksMinedCount}</strong></span>
+            <span>⚔️ Monsters Slain: <strong>${this.player.monstersSlainCount}</strong></span>
+            <span>♻️ Items Recycled: <strong>${this.player.itemsDisposedCount}</strong></span>
+          </div>
+          <div class="ach-list">${achHtml}</div>
+        </div>
+      </div>
+    `;
+
+    this.modalContent.querySelectorAll('.skill-up-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const skillId = (btn as HTMLElement).dataset.skillId as SkillId;
+        if (this.player.upgradeSkill(skillId)) {
+          this.renderHotbar();
+          this.renderSkillsAndAchievementsTab();
         }
       });
     });
@@ -744,7 +1174,7 @@ export class HudAndMenuManager {
               `
               : `
                 <div class="cheat-locked-banner">
-                  🔒 <strong>Cheats are DISABLED in "${this.player.worldName}".</strong> Item granting is locked. To grant yourself items, click <em>Controls & World Settings → Create New World</em> and set <strong>Allow Cheats: ON</strong>.
+                  🔒 <strong>Cheats are DISABLED in "${this.player.worldName}".</strong> Item granting & Daylight toggling [T] are locked. To enable cheats, click <em>Controls & World → Create New World</em> and set <strong>Allow Cheats: ON</strong>.
                 </div>
               `
           }
@@ -777,7 +1207,7 @@ export class HudAndMenuManager {
             this.renderHotbar();
             this.showBanner(
               `TIER ${tier} GEAR GRANTED!`,
-              `${TIER_NAMES[tier].name} weapons & armor equipped.`,
+              `${TIER_NAMES[tier].name} weapons, armor & trinket equipped.`,
               TIER_NAMES[tier].color
             );
           }
@@ -802,18 +1232,25 @@ export class HudAndMenuManager {
     })</h3>
         <div class="help-grid">
           <div class="help-item"><kbd>W A S D</kbd> Move / Strafe</div>
-          <div class="help-item"><kbd>Space</kbd> Jump / Double-Jump / Hold to Glide (Tier V–VI Armor)</div>
+          <div class="help-item"><kbd>Space</kbd> Jump over blocks / Double-Jump / Hold to Glide (Tier V–VI Armor)</div>
           <div class="help-item"><kbd>Shift</kbd> Sprint</div>
           <div class="help-item"><kbd>Q</kbd> Directional Shadow Dash</div>
           <div class="help-item"><kbd>Left Click (Hold)</kbd> Mine Voxel Block / Swing Melee / Fire Ranged Weapon</div>
-          <div class="help-item"><kbd>Right Click</kbd> Trigger Weapon Special Ability / Place Selected Block / Use Potion or Boss Relic</div>
-          <div class="help-item"><kbd>1 – 9</kbd> or <kbd>Scroll</kbd> Select Hotbar Slot</div>
-          <div class="help-item"><kbd>E</kbd> Open Astral Forge & Inventory</div>
+          <div class="help-item"><kbd>Right Click</kbd> Trigger Weapon Special Ability / Place Block / Use Potion or Boss Relic</div>
+          <div class="help-item"><kbd>X</kbd> / <kbd>Shift+X</kbd> Dispose 1 Held Item / Entire Stack into Bonus XP & Mana</div>
+          <div class="help-item"><kbd>B</kbd> Sanctuary Recall (Teleport back to Spawn Sanctuary & heal)</div>
+          <div class="help-item"><kbd>V</kbd> Toggle 1st-Person / 3rd-Person Armored Hero Camera</div>
+          <div class="help-item"><kbd>E</kbd> Open Astral Forge, Inventory & Void Incinerator</div>
+          <div class="help-item"><kbd>K</kbd> Open Hero Skill Tree & Achievements</div>
           <div class="help-item"><kbd>P</kbd> Open 6-Tier Progression & Boss Codex</div>
         </div>
-        <div style="margin-top:20px; display:flex; gap:12px;">
-          <button id="open-new-world-modal-btn" class="codex-btn summon-btn">Create New World (Configure Seed & Cheats)</button>
-          <button id="toggle-mute-btn" class="codex-btn kit-btn">${
+        <div style="margin-top:20px; display:flex; flex-wrap:wrap; gap:12px;">
+          <button id="open-new-world-modal-btn" class="codex-btn summon-btn">🌍 Create New World (Configure Seed & Cheats)</button>
+          <button id="toggle-camera-modal-btn" class="codex-btn kit-btn">🎥 Switch Camera: ${
+            this.player.isThirdPerson ? '3rd-Person Hero' : '1st-Person View'
+          } [V]</button>
+          <button id="recall-sanctuary-modal-btn" class="codex-btn kit-btn">✨ Recall to Spawn Sanctuary [B]</button>
+          <button id="toggle-mute-btn" class="codex-btn kit-btn">🔊 ${
             sound.muted ? 'Unmute Sound Effects' : 'Mute Sound Effects'
           }</button>
         </div>
@@ -824,9 +1261,22 @@ export class HudAndMenuManager {
       this.openWorldCreationScreen();
     });
 
+    document.getElementById('toggle-camera-modal-btn')!.addEventListener('click', (e) => {
+      const is3rd = this.player.toggleCameraView();
+      (e.target as HTMLElement).textContent = `🎥 Switch Camera: ${
+        is3rd ? '3rd-Person Hero' : '1st-Person View'
+      } [V]`;
+    });
+
+    document.getElementById('recall-sanctuary-modal-btn')!.addEventListener('click', () => {
+      this.player.recallToSanctuary();
+      this.toggleMenu(false);
+      this.showBanner('✨ SANCTUARY RECALL', 'Teleported safely back to the Spawn Sanctuary!', '#38bdf8');
+    });
+
     document.getElementById('toggle-mute-btn')!.addEventListener('click', (e) => {
       sound.muted = !sound.muted;
-      (e.target as HTMLElement).textContent = sound.muted ? 'Unmute Sound Effects' : 'Mute Sound Effects';
+      (e.target as HTMLElement).textContent = `🔊 ${sound.muted ? 'Unmute Sound Effects' : 'Mute Sound Effects'}`;
     });
   }
 
@@ -839,7 +1289,7 @@ export class HudAndMenuManager {
     `;
     setTimeout(() => {
       this.bannerEl.style.display = 'none';
-    }, 4500);
+    }, 4200);
   }
 
   private spawnFloatingDamage(worldPos: THREE.Vector3, amount: number, color: string, isCrit?: boolean): void {

@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { sound } from '../audio/soundEngine';
-import { BLOCKS, ITEMS } from '../data/itemsAndBlocks';
+import { ACHIEVEMENTS, BLOCKS, ITEMS, SKILLS } from '../data/itemsAndBlocks';
 import { RECIPES } from '../data/recipes';
-import { BlockId, InventorySlot, ItemDef, ProgressionTier, RecipeDef } from '../types';
+import { AchievementDef, BlockId, InventorySlot, ItemDef, ProgressionTier, RecipeDef, SkillId } from '../types';
 import { VoxelWorld } from '../world/voxelWorld';
 
 export class PlayerController {
@@ -31,6 +31,26 @@ export class PlayerController {
   public unlockedTier: ProgressionTier = 1;
   public defeatedBosses: Set<string> = new Set();
 
+  // RPG Leveling, Skills & Achievements
+  public level = 1;
+  public xp = 0;
+  public xpToNext = 100;
+  public skillPoints = 1;
+  public skills: Record<SkillId, number> = {
+    vitality: 0,
+    arcane: 0,
+    might: 0,
+    prospector: 0,
+    agility: 0,
+  };
+  public unlockedAchievements: Set<string> = new Set();
+  public blocksMinedCount = 0;
+  public monstersSlainCount = 0;
+  public itemsDisposedCount = 0;
+
+  public onLevelUpCallback: ((newLevel: number) => void) | null = null;
+  public onAchievementCallback: ((ach: AchievementDef) => void) | null = null;
+
   // World & Cheats configuration
   public worldName = 'Realm of Aethelgard';
   public cheatsEnabled = false;
@@ -40,14 +60,27 @@ export class PlayerController {
   public inventory: (InventorySlot | null)[] = new Array(36).fill(null);
   public selectedHotbarIndex = 0;
   public equippedArmorId: string | null = null;
+  public equippedTrinketId: string | null = null;
 
   // Cooldowns & animations
   public attackCooldownTimer = 0;
   public abilityCooldownTimer = 0;
   public dashCooldownTimer = 0;
+  public recallCooldownTimer = 0;
   public hurtInvulnTimer = 0;
   public swingAnimProgress = 0;
   public isSwinging = false;
+
+  // Camera perspective (1st person vs 3rd person)
+  public isThirdPerson = false;
+  public heroGroup: THREE.Group;
+  private heroLeftLeg!: THREE.Mesh;
+  private heroRightLeg!: THREE.Mesh;
+  private heroLeftArm!: THREE.Mesh;
+  private heroRightArm!: THREE.Group;
+  private heroTorsoMat!: THREE.MeshLambertMaterial;
+  private heroAccentMat!: THREE.MeshLambertMaterial;
+  private lastHeroArmorId: string | null = '__init__';
 
   // First-person held item 3D rig
   public handGroup: THREE.Group;
@@ -66,12 +99,82 @@ export class PlayerController {
     this.handGroup.add(this.heldMeshGroup);
     this.camera.add(this.handGroup);
 
+    this.heroGroup = new THREE.Group();
+    this.buildThirdPersonHeroMesh();
+    this.world.scene.add(this.heroGroup);
+
     this.initStarterInventory();
     this.loadPlayerState();
     this.recalculateStats();
 
     const spawnY = this.world.getSurfaceHeight(Math.floor(this.position.x), Math.floor(this.position.z)) + 2.5;
     this.position.y = Math.max(this.position.y, spawnY);
+  }
+
+  private buildThirdPersonHeroMesh(): void {
+    this.heroTorsoMat = new THREE.MeshLambertMaterial({ color: '#a16207' });
+    this.heroAccentMat = new THREE.MeshLambertMaterial({ color: '#22c55e', emissive: '#22c55e', emissiveIntensity: 0.25 });
+    const darkMat = new THREE.MeshLambertMaterial({ color: '#1e293b' });
+    const visorMat = new THREE.MeshBasicMaterial({ color: '#38bdf8' });
+
+    // Legs
+    const legGeo = new THREE.BoxGeometry(0.24, 0.68, 0.24);
+    this.heroLeftLeg = new THREE.Mesh(legGeo, darkMat);
+    this.heroLeftLeg.position.set(-0.15, 0.34, 0);
+    this.heroRightLeg = new THREE.Mesh(legGeo, darkMat);
+    this.heroRightLeg.position.set(0.15, 0.34, 0);
+
+    // Armored Torso + Chest Core
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.68, 0.32), this.heroTorsoMat);
+    torso.position.set(0, 1.02, 0);
+    const chestCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.11, 0), this.heroAccentMat);
+    chestCore.position.set(0, 1.06, -0.17);
+    const cape = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.72, 0.04), this.heroAccentMat);
+    cape.position.set(0, 0.96, 0.19);
+    cape.rotation.x = 0.14;
+
+    // Head & Helmet
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), this.heroTorsoMat);
+    head.position.set(0, 1.58, 0);
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.05), visorMat);
+    visor.position.set(0, 1.58, -0.21);
+    const crest = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.46), this.heroAccentMat);
+    crest.position.set(0, 1.82, 0);
+
+    // Arms
+    const armGeo = new THREE.BoxGeometry(0.2, 0.62, 0.2);
+    this.heroLeftArm = new THREE.Mesh(armGeo, this.heroTorsoMat);
+    this.heroLeftArm.position.set(-0.4, 1.02, 0);
+
+    this.heroRightArm = new THREE.Group();
+    this.heroRightArm.position.set(0.4, 1.25, 0);
+    const rArmMesh = new THREE.Mesh(armGeo, this.heroTorsoMat);
+    rArmMesh.position.set(0, -0.23, 0);
+    const rBlade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.55, 0.1), this.heroAccentMat);
+    rBlade.position.set(0, -0.35, -0.32);
+    rBlade.rotation.x = -Math.PI / 3;
+    this.heroRightArm.add(rArmMesh, rBlade);
+
+    this.heroGroup.add(
+      this.heroLeftLeg,
+      this.heroRightLeg,
+      torso,
+      chestCore,
+      cape,
+      head,
+      visor,
+      crest,
+      this.heroLeftArm,
+      this.heroRightArm
+    );
+    this.heroGroup.visible = false;
+  }
+
+  public toggleCameraView(): boolean {
+    this.isThirdPerson = !this.isThirdPerson;
+    this.heroGroup.visible = this.isThirdPerson;
+    this.handGroup.visible = !this.isThirdPerson;
+    return this.isThirdPerson;
   }
 
   public initStarterInventory(): void {
@@ -84,6 +187,7 @@ export class PlayerController {
     this.inventory[5] = { itemId: 'block_torch', count: 16 };
     this.inventory[6] = { itemId: 'block_oak_planks', count: 24 };
     this.equippedArmorId = 'bramble_armor';
+    this.equippedTrinketId = null;
   }
 
   public getSelectedSlot(): InventorySlot | null {
@@ -97,8 +201,8 @@ export class PlayerController {
   }
 
   public recalculateStats(): void {
-    let baseHp = 120;
-    let baseMana = 100;
+    let baseHp = 120 + (this.level - 1) * 10 + (this.skills.vitality || 0) * 25;
+    let baseMana = 100 + (this.level - 1) * 8 + (this.skills.arcane || 0) * 25;
     let def = 0;
 
     if (this.equippedArmorId && ITEMS[this.equippedArmorId]) {
@@ -108,11 +212,192 @@ export class PlayerController {
       def += armor.defense || 0;
     }
 
+    if (this.equippedTrinketId && ITEMS[this.equippedTrinketId]) {
+      const trinket = ITEMS[this.equippedTrinketId];
+      baseHp += trinket.bonusMaxHp || 0;
+      baseMana += trinket.bonusMaxMana || 0;
+      def += trinket.defense || 0;
+    }
+
     this.maxHp = baseHp;
     this.maxMana = baseMana;
-    this.defense = def;
+    this.defense = Math.min(82, def);
     if (this.hp > this.maxHp) this.hp = this.maxHp;
     if (this.mana > this.maxMana) this.mana = this.maxMana;
+  }
+
+  public getDamageMultiplier(): number {
+    const skillMult = (this.skills.might || 0) * 0.08;
+    const trinketMult =
+      this.equippedTrinketId && ITEMS[this.equippedTrinketId]
+        ? ITEMS[this.equippedTrinketId].bonusDamageMult || 0
+        : 0;
+    const levelMult = (this.level - 1) * 0.03;
+    return 1 + skillMult + trinketMult + levelMult;
+  }
+
+  public getMiningSpeedMultiplier(): number {
+    return 1 + (this.skills.prospector || 0) * 0.14;
+  }
+
+  public getDashCooldownDuration(): number {
+    const skillFactor = Math.max(0.4, 1 - (this.skills.agility || 0) * 0.06);
+    const trinketFactor =
+      this.equippedTrinketId && ITEMS[this.equippedTrinketId]?.dashCooldownMult
+        ? ITEMS[this.equippedTrinketId].dashCooldownMult!
+        : 1.0;
+    return Math.max(0.35, 1.6 * skillFactor * trinketFactor);
+  }
+
+  public gainXp(amount: number): void {
+    if (amount <= 0) return;
+    this.xp += Math.round(amount);
+    let leveledUp = false;
+    while (this.xp >= this.xpToNext) {
+      this.xp -= this.xpToNext;
+      this.level++;
+      this.skillPoints++;
+      this.xpToNext = Math.round(100 * Math.pow(1.26, this.level - 1));
+      leveledUp = true;
+    }
+    if (leveledUp) {
+      this.recalculateStats();
+      this.hp = this.maxHp;
+      this.mana = this.maxMana;
+      sound.playFanfare();
+      if (this.onLevelUpCallback) {
+        this.onLevelUpCallback(this.level);
+      }
+    }
+    this.savePlayerState();
+  }
+
+  public upgradeSkill(skillId: SkillId): boolean {
+    if (this.skillPoints <= 0) return false;
+    const def = SKILLS.find((s) => s.id === skillId);
+    if (!def) return false;
+    const cur = this.skills[skillId] || 0;
+    if (cur >= def.maxRank) return false;
+
+    this.skillPoints--;
+    this.skills[skillId] = cur + 1;
+    this.recalculateStats();
+    this.hp = Math.min(this.maxHp, this.hp + 25);
+    this.mana = Math.min(this.maxMana, this.mana + 25);
+    sound.playPickup();
+    this.savePlayerState();
+    return true;
+  }
+
+  public unlockAchievement(achId: string): boolean {
+    if (this.unlockedAchievements.has(achId)) return false;
+    const def = ACHIEVEMENTS.find((a) => a.id === achId);
+    if (!def) return false;
+    this.unlockedAchievements.add(achId);
+    this.gainXp(def.xpReward);
+    sound.playFanfare();
+    if (this.onAchievementCallback) {
+      this.onAchievementCallback(def);
+    }
+    this.savePlayerState();
+    return true;
+  }
+
+  /**
+   * Disposes of items in a given inventory slot (0..35) via the Void Incinerator,
+   * salvaging them into bonus XP and Mana!
+   */
+  public disposeSlotItem(slotIndex: number, disposeAll = true): { itemName: string; count: number; xpGained: number } | null {
+    if (slotIndex < 0 || slotIndex >= this.inventory.length) return null;
+    const slot = this.inventory[slotIndex];
+    if (!slot) return null;
+
+    const def = ITEMS[slot.itemId];
+    const removeCount = disposeAll ? slot.count : 1;
+    const tier = def ? def.tier : 1;
+    const xpGained = Math.max(4, removeCount * tier * 6);
+
+    slot.count -= removeCount;
+    if (slot.count <= 0) {
+      this.inventory[slotIndex] = null;
+    }
+
+    this.itemsDisposedCount += removeCount;
+    this.mana = Math.min(this.maxMana, this.mana + removeCount * 4);
+    this.gainXp(xpGained);
+    this.unlockAchievement('void_incinerator');
+    sound.playBlockBreak();
+    this.savePlayerState();
+
+    return {
+      itemName: def ? def.name : slot.itemId,
+      count: removeCount,
+      xpGained,
+    };
+  }
+
+  /**
+   * Disposes of the currently held hotbar item ([X] key).
+   */
+  public disposeHeldItem(disposeEntireStack = false): { itemName: string; count: number; xpGained: number } | null {
+    return this.disposeSlotItem(this.selectedHotbarIndex, disposeEntireStack);
+  }
+
+  /**
+   * Consolidates partial stacks and cleanly sorts the backpack slots (9..35) by Category & Tier.
+   */
+  public sortAndStackInventory(): void {
+    // 1. Merge partial stacks across all slots
+    for (let i = 0; i < this.inventory.length; i++) {
+      const slotA = this.inventory[i];
+      if (!slotA) continue;
+      const def = ITEMS[slotA.itemId];
+      if (!def || slotA.count >= def.maxStack) continue;
+
+      for (let j = i + 1; j < this.inventory.length; j++) {
+        const slotB = this.inventory[j];
+        if (slotB && slotB.itemId === slotA.itemId) {
+          const transfer = Math.min(def.maxStack - slotA.count, slotB.count);
+          slotA.count += transfer;
+          slotB.count -= transfer;
+          if (slotB.count <= 0) {
+            this.inventory[j] = null;
+          }
+          if (slotA.count >= def.maxStack) break;
+        }
+      }
+    }
+
+    // 2. Sort backpack slots (indices 9..35) by Tier descending, then Category, then Name
+    const backpack = this.inventory.slice(9).filter((s): s is InventorySlot => s !== null);
+    backpack.sort((a, b) => {
+      const defA = ITEMS[a.itemId];
+      const defB = ITEMS[b.itemId];
+      if (!defA || !defB) return 0;
+      if (defB.tier !== defA.tier) return defB.tier - defA.tier;
+      if (defA.category !== defB.category) return defA.category.localeCompare(defB.category);
+      return defA.name.localeCompare(defB.name);
+    });
+
+    for (let i = 9; i < 36; i++) {
+      this.inventory[i] = backpack[i - 9] || null;
+    }
+
+    sound.playPickup();
+    this.savePlayerState();
+  }
+
+  public recallToSanctuary(): boolean {
+    if (this.recallCooldownTimer > 0) return false;
+    this.recallCooldownTimer = 6.0;
+    const sy = this.world.getSurfaceHeight(6, 9) + 2.8;
+    this.position.set(6.5, sy, 9.5);
+    this.velocity.set(0, 0, 0);
+    this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.35);
+    this.mana = Math.min(this.maxMana, this.mana + this.maxMana * 0.35);
+    sound.playFanfare();
+    this.savePlayerState();
+    return true;
   }
 
   public addItem(itemId: string, count = 1): boolean {
@@ -199,7 +484,6 @@ export class PlayerController {
     }
     const resultDef = ITEMS[recipe.resultItemId];
     if (resultDef && resultDef.category === 'armor') {
-      // Automatically equip newly crafted armor if higher tier or unequipped, and put old armor in inventory
       if (this.equippedArmorId) {
         this.addItem(this.equippedArmorId, 1);
       }
@@ -207,13 +491,26 @@ export class PlayerController {
       this.recalculateStats();
       this.hp = this.maxHp;
       this.mana = this.maxMana;
+    } else if (resultDef && resultDef.category === 'trinket') {
+      if (this.equippedTrinketId) {
+        this.addItem(this.equippedTrinketId, 1);
+      }
+      this.equippedTrinketId = recipe.resultItemId;
+      this.recalculateStats();
+      this.hp = this.maxHp;
+      this.mana = this.maxMana;
     } else {
       this.addItem(recipe.resultItemId, recipe.resultCount);
+    }
+
+    if (recipe.resultItemId === 'bronze_ingot') {
+      this.unlockAchievement('bronze_smith');
     }
 
     if (recipe.tier > this.unlockedTier) {
       this.unlockedTier = recipe.tier;
     }
+    this.gainXp(recipe.tier * 22);
     sound.playPickup();
     this.savePlayerState();
     return true;
@@ -226,18 +523,18 @@ export class PlayerController {
 
   public triggerDash(): boolean {
     if (this.dashCooldownTimer > 0) return false;
-    this.dashCooldownTimer = 1.6;
+    this.dashCooldownTimer = this.getDashCooldownDuration();
     const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-    this.velocity.x = forward.x * 15;
-    this.velocity.z = forward.z * 15;
-    this.velocity.y = Math.max(this.velocity.y, 4.2);
+    this.velocity.x = forward.x * 16;
+    this.velocity.z = forward.z * 16;
+    this.velocity.y = Math.max(this.velocity.y, 4.4);
     sound.playSwordSwing(true);
     return true;
   }
 
   public takeDamage(rawDamage: number): number {
     if (this.hurtInvulnTimer > 0) return 0;
-    const reduction = Math.min(0.78, this.defense / 100);
+    const reduction = Math.min(0.82, this.defense / 100);
     const finalDmg = Math.max(1, Math.round(rawDamage * (1 - reduction)));
     this.hp = Math.max(0, this.hp - finalDmg);
     this.hurtInvulnTimer = 0.45;
@@ -247,8 +544,8 @@ export class PlayerController {
       // Respawn at Sanctuary with full HP
       this.hp = this.maxHp;
       this.mana = this.maxMana;
-      const sy = this.world.getSurfaceHeight(6, 6) + 3;
-      this.position.set(6.5, sy, 6.5);
+      const sy = this.world.getSurfaceHeight(6, 9) + 3;
+      this.position.set(6.5, sy, 9.5);
       this.velocity.set(0, 0, 0);
     }
     return finalDmg;
@@ -258,16 +555,25 @@ export class PlayerController {
     this.attackCooldownTimer = Math.max(0, this.attackCooldownTimer - dt);
     this.abilityCooldownTimer = Math.max(0, this.abilityCooldownTimer - dt);
     this.dashCooldownTimer = Math.max(0, this.dashCooldownTimer - dt);
+    this.recallCooldownTimer = Math.max(0, this.recallCooldownTimer - dt);
     this.hurtInvulnTimer = Math.max(0, this.hurtInvulnTimer - dt);
 
-    // Passive HP & Mana Regeneration
-    const tierBonus = this.unlockedTier * 0.4;
-    this.hp = Math.min(this.maxHp, this.hp + (1.8 + tierBonus) * dt);
-    this.mana = Math.min(this.maxMana, this.mana + (9.5 + tierBonus * 2.5) * dt);
-
     const armor = this.equippedArmorId ? ITEMS[this.equippedArmorId] : null;
-    const speedMult = armor?.speedMultiplier || 1.0;
-    const jumpMult = armor?.jumpBoost || 1.0;
+    const trinket = this.equippedTrinketId ? ITEMS[this.equippedTrinketId] : null;
+
+    // Passive HP & Mana Regeneration (boosted by Tier, Vitality/Arcane skills, and Trinkets)
+    const tierBonus = this.unlockedTier * 0.4;
+    const vitalityRegen = (this.skills.vitality || 0) * 1.2;
+    const trinketRegen = trinket?.bonusRegen || 0;
+    const arcaneMult = 1 + (this.skills.arcane || 0) * 0.2;
+
+    this.hp = Math.min(this.maxHp, this.hp + (1.8 + tierBonus + vitalityRegen + trinketRegen) * dt);
+    this.mana = Math.min(this.maxMana, this.mana + (9.5 + tierBonus * 2.5) * arcaneMult * dt);
+
+    const armorSpeed = armor?.speedMultiplier || 1.0;
+    const trinketSpeed = trinket?.speedMultiplier || 1.0;
+    const agilitySpeed = 1 + (this.skills.agility || 0) * 0.04;
+    const speedMult = armorSpeed * Math.max(1.0, trinketSpeed) * agilitySpeed;
 
     // Check water / magma at feet
     const footBlock = this.world.getBlock(this.position.x, this.position.y + 0.2, this.position.z);
@@ -320,13 +626,52 @@ export class PlayerController {
       this.jumpsRemaining = armor?.allowDoubleJump ? (armor.tier >= 6 ? 3 : 2) : 1;
     }
 
-    // Update Camera Transform
-    this.camera.position.set(this.position.x, this.position.y + this.eyeHeight, this.position.z);
+    // Update Camera Transform (1st person vs 3rd person orbit)
     const euler = new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ');
     this.camera.quaternion.setFromEuler(euler);
 
+    if (this.isThirdPerson) {
+      const lookBack = new THREE.Vector3(0, 0, 1).applyEuler(euler);
+      const camDist = 4.2;
+      const targetCamPos = new THREE.Vector3(
+        this.position.x + lookBack.x * camDist,
+        this.position.y + this.eyeHeight + 0.45 + lookBack.y * camDist * 0.6,
+        this.position.z + lookBack.z * camDist
+      );
+      this.camera.position.copy(targetCamPos);
+      this.updateThirdPersonHeroModel(moveDir.lengthSq() > 0);
+    } else {
+      this.camera.position.set(this.position.x, this.position.y + this.eyeHeight, this.position.z);
+    }
+
     // Update Held Item 3D Model & Animation
     this.updateHeldItemModel(dt, moveDir.lengthSq() > 0);
+  }
+
+  private updateThirdPersonHeroModel(isMoving: boolean): void {
+    this.heroGroup.position.copy(this.position);
+    this.heroGroup.rotation.y = this.yaw;
+
+    if (this.equippedArmorId !== this.lastHeroArmorId) {
+      this.lastHeroArmorId = this.equippedArmorId;
+      const armor = this.equippedArmorId ? ITEMS[this.equippedArmorId] : null;
+      this.heroTorsoMat.color.set(armor ? armor.primaryColor : '#64748b');
+      this.heroAccentMat.color.set(armor ? armor.secondaryColor : '#38bdf8');
+      this.heroAccentMat.emissive.set(armor ? armor.secondaryColor : '#38bdf8');
+    }
+
+    const t = performance.now() * 0.01;
+    const walkSwing = isMoving ? Math.sin(t) * 0.65 : 0;
+    this.heroLeftLeg.rotation.x = walkSwing;
+    this.heroRightLeg.rotation.x = -walkSwing;
+    this.heroLeftArm.rotation.x = -walkSwing * 0.8;
+
+    if (this.isSwinging) {
+      const s = Math.sin(this.swingAnimProgress * Math.PI);
+      this.heroRightArm.rotation.x = -s * 1.6;
+    } else {
+      this.heroRightArm.rotation.x = walkSwing * 0.8;
+    }
   }
 
   public handleJumpKeyPress(): void {
@@ -657,6 +1002,8 @@ export class PlayerController {
       if (!def) continue;
       if (def.category === 'armor') {
         this.equippedArmorId = def.id;
+      } else if (def.category === 'trinket') {
+        this.equippedTrinketId = def.id;
       } else if (def.category === 'boss_relic') {
         this.addItem(def.id, 2);
       } else if (def.category === 'melee' || def.category === 'ranged' || def.category === 'tool') {
@@ -686,6 +1033,15 @@ export class PlayerController {
     this.cheatsEnabled = cheatsEnabled;
     this.unlockedTier = 1;
     this.defeatedBosses.clear();
+    this.level = 1;
+    this.xp = 0;
+    this.xpToNext = 100;
+    this.skillPoints = 1;
+    this.skills = { vitality: 0, arcane: 0, might: 0, prospector: 0, agility: 0 };
+    this.unlockedAchievements.clear();
+    this.blocksMinedCount = 0;
+    this.monstersSlainCount = 0;
+    this.itemsDisposedCount = 0;
     this.initStarterInventory();
     this.recalculateStats();
     this.hp = this.maxHp;
@@ -707,8 +1063,18 @@ export class PlayerController {
         cheatsEnabled: this.cheatsEnabled,
         inventory: this.inventory,
         equippedArmorId: this.equippedArmorId,
+        equippedTrinketId: this.equippedTrinketId,
         unlockedTier: this.unlockedTier,
         defeatedBosses: Array.from(this.defeatedBosses),
+        level: this.level,
+        xp: this.xp,
+        xpToNext: this.xpToNext,
+        skillPoints: this.skillPoints,
+        skills: this.skills,
+        unlockedAchievements: Array.from(this.unlockedAchievements),
+        blocksMinedCount: this.blocksMinedCount,
+        monstersSlainCount: this.monstersSlainCount,
+        itemsDisposedCount: this.itemsDisposedCount,
       };
       localStorage.setItem('aethelgard_player_state', JSON.stringify(state));
       this.hasSavedWorld = true;
@@ -741,12 +1107,28 @@ export class PlayerController {
       if (state.equippedArmorId) {
         this.equippedArmorId = state.equippedArmorId;
       }
+      if (state.equippedTrinketId) {
+        this.equippedTrinketId = state.equippedTrinketId;
+      }
       if (state.unlockedTier) {
         this.unlockedTier = state.unlockedTier;
       }
       if (Array.isArray(state.defeatedBosses)) {
         this.defeatedBosses = new Set(state.defeatedBosses);
       }
+      if (typeof state.level === 'number') this.level = state.level;
+      if (typeof state.xp === 'number') this.xp = state.xp;
+      if (typeof state.xpToNext === 'number') this.xpToNext = state.xpToNext;
+      if (typeof state.skillPoints === 'number') this.skillPoints = state.skillPoints;
+      if (state.skills && typeof state.skills === 'object') {
+        this.skills = { ...this.skills, ...state.skills };
+      }
+      if (Array.isArray(state.unlockedAchievements)) {
+        this.unlockedAchievements = new Set(state.unlockedAchievements);
+      }
+      if (typeof state.blocksMinedCount === 'number') this.blocksMinedCount = state.blocksMinedCount;
+      if (typeof state.monstersSlainCount === 'number') this.monstersSlainCount = state.monstersSlainCount;
+      if (typeof state.itemsDisposedCount === 'number') this.itemsDisposedCount = state.itemsDisposedCount;
     } catch {
       // ignore corrupt storage
     }

@@ -604,6 +604,72 @@ export const RECIPES: RecipeDef[] = [
       { itemId: 'void_crystal', count: 4 },
     ],
   },
+
+  // ========================
+  // MYTHIC TRINKET RECIPES
+  // ========================
+  {
+    id: 'craft_sylvan_root_charm',
+    resultItemId: 'sylvan_root_charm',
+    resultCount: 1,
+    tier: 2,
+    category: 'trinket',
+    station: 'Bronze Smeltery',
+    ingredients: [
+      { itemId: 'bronze_ingot', count: 2 },
+      { itemId: 'sylvan_essence', count: 2 },
+      { itemId: 'living_vine', count: 3 },
+    ],
+  },
+  {
+    id: 'craft_cryo_heart_amulet',
+    resultItemId: 'cryo_heart_amulet',
+    resultCount: 1,
+    tier: 3,
+    category: 'trinket',
+    station: 'Frostforged Anvil',
+    ingredients: [
+      { itemId: 'mythril_ingot', count: 3 },
+      { itemId: 'cryo_shard', count: 3 },
+    ],
+  },
+  {
+    id: 'craft_solar_phoenix_ring',
+    resultItemId: 'solar_phoenix_ring',
+    resultCount: 1,
+    tier: 4,
+    category: 'trinket',
+    station: 'Solar Pyroclast Forge',
+    ingredients: [
+      { itemId: 'pyroclast_ingot', count: 3 },
+      { itemId: 'solar_cinder', count: 4 },
+    ],
+  },
+  {
+    id: 'craft_void_phase_cloak',
+    resultItemId: 'void_phase_cloak',
+    resultCount: 1,
+    tier: 5,
+    category: 'trinket',
+    station: 'Astral Nexus Altar',
+    ingredients: [
+      { itemId: 'aetherium_ingot', count: 3 },
+      { itemId: 'void_crystal', count: 4 },
+    ],
+  },
+  {
+    id: 'craft_celestial_star_halo',
+    resultItemId: 'celestial_star_halo',
+    resultCount: 1,
+    tier: 6,
+    category: 'trinket',
+    station: 'Astral Nexus Altar',
+    ingredients: [
+      { itemId: 'starsteel_ingot', count: 4 },
+      { itemId: 'astral_keystone', count: 1 },
+      { itemId: 'void_crystal', count: 3 },
+    ],
+  },
 ];
 
 export const PROGRESSION_GUIDE: Record<

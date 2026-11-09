@@ -674,8 +674,12 @@ export class EntityManager {
 
   public performPlayerMeleeAttack(item: typeof ITEMS[string]): void {
     const reach = item.reach || 4.5;
-    const baseDmg = item.damage || 10;
-    const camPos = this.player.camera.position.clone();
+    const baseDmg = Math.round((item.damage || 10) * this.player.getDamageMultiplier());
+    const camPos = new THREE.Vector3(
+      this.player.position.x,
+      this.player.position.y + this.player.eyeHeight,
+      this.player.position.z
+    );
     const camDir = new THREE.Vector3();
     this.player.camera.getWorldDirection(camDir);
 
@@ -746,10 +750,14 @@ export class EntityManager {
     this.player.abilityCooldownTimer = ab.cooldown;
     this.player.triggerSwing();
 
-    const camPos = this.player.camera.position.clone();
+    const camPos = new THREE.Vector3(
+      this.player.position.x,
+      this.player.position.y + this.player.eyeHeight,
+      this.player.position.z
+    );
     const camDir = new THREE.Vector3();
     this.player.camera.getWorldDirection(camDir);
-    const baseDmg = item.damage || 20;
+    const baseDmg = Math.round((item.damage || 20) * this.player.getDamageMultiplier());
 
     switch (ab.type) {
       case 'arrow_shot':
@@ -945,13 +953,17 @@ export class EntityManager {
     );
 
     if (mob.hp <= 0) {
-      // Drop loot
+      // Drop loot & grant XP
       for (const drop of mob.def.drops) {
         if (Math.random() <= drop.chance) {
           const count = drop.min + Math.floor(Math.random() * (drop.max - drop.min + 1));
           this.spawnDroppedItem(drop.itemId, count, mob.position.clone().add(new THREE.Vector3(0, 0.8, 0)));
         }
       }
+      this.player.monstersSlainCount++;
+      this.player.gainXp(mob.def.tier * 35);
+      this.player.unlockAchievement('night_hunter');
+
       this.spawnParticles(mob.position.clone().add(new THREE.Vector3(0, 1.0, 0)), mob.def.bodyColor, 18, 5);
       this.scene.remove(mob.rootGroup);
       const idx = this.monsters.indexOf(mob);
@@ -1001,6 +1013,12 @@ export class EntityManager {
       if (defeatedDef.unlocksTier > this.player.unlockedTier) {
         this.player.unlockedTier = defeatedDef.unlocksTier as ProgressionTier;
       }
+      this.player.gainXp(defeatedDef.tier * 280);
+      if (defeatedDef.id === 'boss_sylvan_behemoth') this.player.unlockAchievement('slay_behemoth');
+      if (defeatedDef.id === 'boss_cryonax') this.player.unlockAchievement('slay_cryonax');
+      if (defeatedDef.id === 'boss_ignis_rex') this.player.unlockAchievement('slay_ignis');
+      if (defeatedDef.id === 'boss_malakor') this.player.unlockAchievement('slay_malakor');
+      if (defeatedDef.id === 'boss_aethelgard') this.player.unlockAchievement('slay_aethelgard');
       this.player.savePlayerState();
 
       if (this.onBannerNotification) {

@@ -204,6 +204,11 @@ class AethelgardGame {
         this.ui.toggleMenu(undefined, 'craft');
         return;
       }
+      if (e.code === 'KeyK') {
+        e.preventDefault();
+        this.ui.toggleMenu(undefined, 'skills');
+        return;
+      }
       if (e.code === 'KeyP') {
         e.preventDefault();
         this.ui.toggleMenu(undefined, 'codex');
@@ -221,6 +226,34 @@ class AethelgardGame {
       }
       if (e.code === 'KeyQ') {
         this.player.triggerDash();
+      }
+      if (e.code === 'KeyX') {
+        // Dispose of 1 item (or entire stack if holding Shift) from currently selected hotbar slot
+        const disposed = this.player.disposeHeldItem(e.shiftKey);
+        if (disposed) {
+          this.ui.renderHotbar();
+          const frontPos = this.player.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+          this.entities.spawnParticles(frontPos, '#c084fc', 16, 4.5);
+          this.ui.showBanner(
+            '♻️ ITEM DISPOSED (VOID INCINERATOR)',
+            `Salvaged ${disposed.count}x ${disposed.itemName} into +${disposed.xpGained} Hero XP!`,
+            '#c084fc'
+          );
+        }
+      }
+      if (e.code === 'KeyB') {
+        if (this.player.recallToSanctuary()) {
+          this.entities.spawnParticles(this.player.position.clone().add(new THREE.Vector3(0, 1, 0)), '#38bdf8', 28, 6);
+          this.ui.showBanner('✨ SANCTUARY RECALL', 'Teleported back to the Spawn Sanctuary & restored vitality!', '#38bdf8');
+        }
+      }
+      if (e.code === 'KeyV') {
+        const is3rd = this.player.toggleCameraView();
+        this.ui.showBanner(
+          is3rd ? '🎥 3RD-PERSON HERO CAMERA' : '🎥 1ST-PERSON CAMERA',
+          'Press [V] anytime to switch camera perspectives.',
+          '#38bdf8'
+        );
       }
       if (e.code === 'KeyT') {
         if (this.player.cheatsEnabled) {
@@ -329,7 +362,12 @@ class AethelgardGame {
     if (item.category === 'block' && item.blockId) {
       const dir = new THREE.Vector3();
       this.camera.getWorldDirection(dir);
-      const hit = this.world.raycast(this.camera.position, dir, 6.0);
+      const eyeOrigin = new THREE.Vector3(
+        this.player.position.x,
+        this.player.position.y + this.player.eyeHeight,
+        this.player.position.z
+      );
+      const hit = this.world.raycast(eyeOrigin, dir, 6.0);
       if (hit) {
         const placePos = hit.voxel.clone().add(hit.normal);
         // Ensure new block does not intersect player AABB
@@ -359,7 +397,12 @@ class AethelgardGame {
     this.camera.getWorldDirection(dir);
     const held = this.player.getSelectedItemDef();
     const reach = held?.reach || 5.2;
-    const hit = this.world.raycast(this.camera.position, dir, reach);
+    const eyeOrigin = new THREE.Vector3(
+      this.player.position.x,
+      this.player.position.y + this.player.eyeHeight,
+      this.player.position.z
+    );
+    const hit = this.world.raycast(eyeOrigin, dir, reach);
 
     if (!hit) {
       this.targetBoxWire.visible = false;
@@ -402,6 +445,7 @@ class AethelgardGame {
         speedMult = held?.toolType === 'axe' ? held.miningSpeed || 1.6 : 1.1;
       }
 
+      speedMult *= this.player.getMiningSpeedMultiplier();
       this.miningProgress += (dt * speedMult) / Math.max(0.15, blockDef.hardness);
       this.player.triggerSwing();
 
@@ -424,6 +468,12 @@ class AethelgardGame {
           14,
           4
         );
+
+        this.player.blocksMinedCount++;
+        this.player.gainXp((blockDef.minToolTier + 1) * 8);
+        if (this.player.blocksMinedCount >= 10) {
+          this.player.unlockAchievement('first_harvest');
+        }
 
         if (blockDef.dropItem && pickInfo.tier >= blockDef.minToolTier) {
           this.player.addItem(blockDef.dropItem, blockDef.dropCount);
