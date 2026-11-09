@@ -449,9 +449,10 @@ class AethelgardGame {
           '#c084fc'
         );
       } else {
+        this.entities.despawnAllMonsters();
         this.ui.showBanner(
           '☀️ DAWN BREAKS',
-          'Sunlight returns — natural monster spawning has stopped.',
+          'Sunlight returns — all monsters have vanished!',
           '#fde047'
         );
       }

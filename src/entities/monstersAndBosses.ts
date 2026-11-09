@@ -101,7 +101,7 @@ export class EntityManager {
   }
 
   public update(dt: number, isNightTime = false): void {
-    // Natural monster spawning ONLY happens at night!
+    // Natural monster spawning ONLY happens at night; all monsters disappear when it becomes day!
     if (isNightTime) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
@@ -110,6 +110,8 @@ export class EntityManager {
           this.spawnBiomeMonsterNearPlayer();
         }
       }
+    } else if (this.monsters.length > 0) {
+      this.despawnAllMonsters();
     }
 
     this.updateMonsters(dt);
@@ -118,6 +120,19 @@ export class EntityManager {
     this.updateDroppedItems(dt);
     this.updateParticles(dt);
     this.updateShockwaves(dt);
+  }
+
+  public despawnAllMonsters(): void {
+    for (const m of this.monsters) {
+      this.spawnParticles(
+        m.position.clone().add(new THREE.Vector3(0, 1.0, 0)),
+        '#fde047',
+        12,
+        4.5
+      );
+      this.scene.remove(m.rootGroup);
+    }
+    this.monsters.length = 0;
   }
 
   private spawnBiomeMonsterNearPlayer(): void {
