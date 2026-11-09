@@ -346,27 +346,18 @@ export class PlayerController {
   }
 
   private moveWithCollision(dt: number): void {
-    // X axis
+    // X axis (no auto-step: player must jump to get over blocks!)
     this.position.x += this.velocity.x * dt;
     if (this.checkCollision(this.position.x, this.position.y, this.position.z)) {
-      // Auto step-up 1 block if walking into a low ledge
-      if (this.onGround && !this.checkCollision(this.position.x, this.position.y + 1.05, this.position.z)) {
-        this.position.y += 1.02;
-      } else {
-        this.position.x -= this.velocity.x * dt;
-        this.velocity.x = 0;
-      }
+      this.position.x -= this.velocity.x * dt;
+      this.velocity.x = 0;
     }
 
-    // Z axis
+    // Z axis (no auto-step: player must jump to get over blocks!)
     this.position.z += this.velocity.z * dt;
     if (this.checkCollision(this.position.x, this.position.y, this.position.z)) {
-      if (this.onGround && !this.checkCollision(this.position.x, this.position.y + 1.05, this.position.z)) {
-        this.position.y += 1.02;
-      } else {
-        this.position.z -= this.velocity.z * dt;
-        this.velocity.z = 0;
-      }
+      this.position.z -= this.velocity.z * dt;
+      this.velocity.z = 0;
     }
 
     // Y axis
@@ -375,8 +366,10 @@ export class PlayerController {
     if (this.checkCollision(this.position.x, this.position.y, this.position.z)) {
       if (this.velocity.y < 0) {
         this.onGround = true;
+        this.position.y = Math.floor(this.position.y) + 1.0001;
+      } else {
+        this.position.y -= this.velocity.y * dt;
       }
-      this.position.y -= this.velocity.y * dt;
       this.velocity.y = 0;
     }
 
@@ -390,8 +383,8 @@ export class PlayerController {
     const hw = this.width * 0.5;
     const minX = Math.floor(px - hw);
     const maxX = Math.floor(px + hw);
-    const minY = Math.floor(py);
-    const maxY = Math.floor(py + this.height);
+    const minY = Math.floor(py + 0.001);
+    const maxY = Math.floor(py + this.height - 0.001);
     const minZ = Math.floor(pz - hw);
     const maxZ = Math.floor(pz + hw);
 
@@ -451,60 +444,198 @@ export class PlayerController {
   private buildHeldMeshFor(item: ItemDef): void {
     const primaryMat = new THREE.MeshLambertMaterial({
       color: item.primaryColor,
-      emissive: item.tier >= 3 ? item.primaryColor : '#000000',
-      emissiveIntensity: item.tier >= 3 ? 0.28 : 0,
+      emissive: item.tier >= 2 ? item.primaryColor : '#000000',
+      emissiveIntensity: item.tier >= 3 ? 0.32 : item.tier === 2 ? 0.12 : 0,
     });
-    const secondaryMat = new THREE.MeshLambertMaterial({ color: item.secondaryColor });
-    const handleMat = new THREE.MeshLambertMaterial({ color: '#78350f' });
+    const secondaryMat = new THREE.MeshLambertMaterial({
+      color: item.secondaryColor,
+      emissive: item.tier >= 4 ? item.secondaryColor : '#000000',
+      emissiveIntensity: item.tier >= 4 ? 0.25 : 0,
+    });
+    const handleMat = new THREE.MeshLambertMaterial({ color: '#5c3a21' });
+    const gripBandMat = new THREE.MeshLambertMaterial({ color: '#292524' });
+    const glowMat = new THREE.MeshBasicMaterial({ color: item.secondaryColor });
 
     if (item.category === 'block') {
       const box = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.28), primaryMat);
-      this.heldMeshGroup.add(box);
+      const trim = new THREE.Mesh(new THREE.BoxGeometry(0.29, 0.06, 0.29), secondaryMat);
+      trim.position.y = 0.11;
+      this.heldMeshGroup.add(box, trim);
       return;
     }
 
     if (item.category === 'melee') {
-      // Hilt + Crossguard + Blade
-      const hilt = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.05), handleMat);
+      // Pommel + Wrapped Grip
+      const pommel = new THREE.Mesh(new THREE.OctahedronGeometry(0.055, 0), secondaryMat);
+      pommel.position.set(0, -0.22, 0);
+      const hilt = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.22, 0.048), handleMat);
       hilt.position.set(0, -0.1, 0);
-      const guard = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.07), secondaryMat);
-      guard.position.set(0, 0.02, 0);
-      const bladeLen = item.iconShape === 'greatsword' ? 0.62 : 0.5;
-      const bladeWidth = item.iconShape === 'greatsword' ? 0.11 : 0.07;
-      const blade = new THREE.Mesh(new THREE.BoxGeometry(bladeWidth, bladeLen, 0.03), primaryMat);
-      blade.position.set(0, 0.04 + bladeLen * 0.5, 0);
-      this.heldMeshGroup.add(hilt, guard, blade);
+      const band1 = new THREE.Mesh(new THREE.BoxGeometry(0.054, 0.03, 0.054), gripBandMat);
+      band1.position.set(0, -0.14, 0);
+      const band2 = new THREE.Mesh(new THREE.BoxGeometry(0.054, 0.03, 0.054), gripBandMat);
+      band2.position.set(0, -0.06, 0);
+      this.heldMeshGroup.add(pommel, hilt, band1, band2);
 
-      if (item.iconShape === 'scythe' || item.iconShape === 'hammer') {
-        const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.12, 0.12), primaryMat);
-        head.position.set(-0.1, 0.45, 0);
-        this.heldMeshGroup.add(head);
+      if (item.iconShape === 'scythe') {
+        const pole = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.68, 0.048), handleMat);
+        pole.position.set(0, 0.2, 0);
+        const socket = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.08), secondaryMat);
+        socket.position.set(0, 0.52, 0);
+        const bladeBase = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.09, 0.035), primaryMat);
+        bladeBase.position.set(-0.12, 0.54, 0);
+        bladeBase.rotation.z = 0.22;
+        const bladeTip = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.03), glowMat);
+        bladeTip.position.set(-0.29, 0.46, 0);
+        bladeTip.rotation.z = 0.65;
+        this.heldMeshGroup.add(pole, socket, bladeBase, bladeTip);
+        return;
       }
+
+      if (item.iconShape === 'hammer') {
+        const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.56, 0.055), handleMat);
+        shaft.position.set(0, 0.16, 0);
+        const headCore = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.18), primaryMat);
+        headCore.position.set(0, 0.44, 0);
+        const faceL = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.22), secondaryMat);
+        faceL.position.set(-0.19, 0.44, 0);
+        const faceR = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.22), secondaryMat);
+        faceR.position.set(0.19, 0.44, 0);
+        const topSpike = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.14, 4), glowMat);
+        topSpike.position.set(0, 0.59, 0);
+        this.heldMeshGroup.add(shaft, headCore, faceL, faceR, topSpike);
+        return;
+      }
+
+      // Detailed Crossguard with Wing Tips & Center Gem
+      const isGreat = item.iconShape === 'greatsword';
+      const isKatana = item.iconShape === 'katana';
+      const guardWidth = isKatana ? 0.14 : isGreat ? 0.32 : 0.24;
+      const guard = new THREE.Mesh(new THREE.BoxGeometry(guardWidth, 0.05, 0.075), secondaryMat);
+      guard.position.set(0, 0.02, 0);
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.045, 0), glowMat);
+      gem.position.set(0, 0.02, 0.04);
+      this.heldMeshGroup.add(guard, gem);
+
+      if (!isKatana) {
+        const wingL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.06), primaryMat);
+        wingL.position.set(-guardWidth * 0.5, 0.04, 0);
+        wingL.rotation.z = 0.35;
+        const wingR = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.06), primaryMat);
+        wingR.position.set(guardWidth * 0.5, 0.04, 0);
+        wingR.rotation.z = -0.35;
+        this.heldMeshGroup.add(wingL, wingR);
+      }
+
+      // Multi-part Tapered Blade + Glowing Fuller Core + Tip
+      const bladeLen = isGreat ? 0.64 : isKatana ? 0.6 : 0.5;
+      const bladeWidth = isGreat ? 0.12 : isKatana ? 0.055 : 0.085;
+      const bladeBody = new THREE.Mesh(new THREE.BoxGeometry(bladeWidth, bladeLen, 0.028), primaryMat);
+      bladeBody.position.set(0, 0.04 + bladeLen * 0.5, 0);
+
+      const fuller = new THREE.Mesh(new THREE.BoxGeometry(bladeWidth * 0.45, bladeLen * 0.82, 0.034), secondaryMat);
+      fuller.position.set(0, 0.04 + bladeLen * 0.46, 0);
+
+      const bladeTip = new THREE.Mesh(new THREE.ConeGeometry(bladeWidth * 0.65, 0.14, 4), primaryMat);
+      bladeTip.rotation.y = Math.PI / 4;
+      bladeTip.position.set(0, 0.04 + bladeLen + 0.06, 0);
+
+      this.heldMeshGroup.add(bladeBody, fuller, bladeTip);
       return;
     }
 
     if (item.category === 'tool') {
-      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.48, 0.05), handleMat);
-      handle.position.set(0, 0.1, 0);
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 0.07), primaryMat);
-      head.position.set(0, 0.32, 0);
-      this.heldMeshGroup.add(handle, head);
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.52, 0.048), handleMat);
+      handle.position.set(0, 0.12, 0);
+      const collar = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.08, 0.075), secondaryMat);
+      collar.position.set(0, 0.34, 0);
+      this.heldMeshGroup.add(handle, collar);
+
+      if (item.toolType === 'pickaxe') {
+        const centerHead = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.075, 0.065), primaryMat);
+        centerHead.position.set(0, 0.35, 0);
+        const prongL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.055, 0.05), primaryMat);
+        prongL.position.set(-0.15, 0.32, 0);
+        prongL.rotation.z = 0.38;
+        const prongR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.055, 0.05), primaryMat);
+        prongR.position.set(0.15, 0.32, 0);
+        prongR.rotation.z = -0.38;
+        const tipL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.04), glowMat);
+        tipL.position.set(-0.22, 0.29, 0);
+        const tipR = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.04), glowMat);
+        tipR.position.set(0.22, 0.29, 0);
+        this.heldMeshGroup.add(centerHead, prongL, prongR, tipL, tipR);
+      } else {
+        // Bearded Hatchet / Axe
+        const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.16, 0.045), primaryMat);
+        cheek.position.set(-0.1, 0.33, 0);
+        const edge = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.22, 0.03), glowMat);
+        edge.position.set(-0.19, 0.32, 0);
+        const poll = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.055), secondaryMat);
+        poll.position.set(0.06, 0.34, 0);
+        this.heldMeshGroup.add(cheek, edge, poll);
+      }
       return;
     }
 
     if (item.category === 'ranged') {
-      const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, 0.48), primaryMat);
-      body.position.set(0, 0.08, -0.1);
-      const core = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), secondaryMat);
-      core.position.set(0, 0.12, -0.32);
-      this.heldMeshGroup.add(body, core);
+      if (item.iconShape === 'bow') {
+        const riser = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.18, 0.05), handleMat);
+        const upperLimb = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.24, 0.04), primaryMat);
+        upperLimb.position.set(0, 0.18, 0.05);
+        upperLimb.rotation.x = -0.35;
+        const lowerLimb = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.24, 0.04), primaryMat);
+        lowerLimb.position.set(0, -0.18, 0.05);
+        lowerLimb.rotation.x = 0.35;
+        const bowString = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.56, 0.01), glowMat);
+        bowString.position.set(0, 0, 0.12);
+        const arrowShaft = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.45), secondaryMat);
+        arrowShaft.position.set(0, 0, -0.05);
+        this.heldMeshGroup.add(riser, upperLimb, lowerLimb, bowString, arrowShaft);
+        return;
+      }
+
+      if (item.iconShape === 'staff') {
+        const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.62, 0.045), handleMat);
+        shaft.position.set(0, 0.15, 0);
+        const prong1 = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.16, 0.035), secondaryMat);
+        prong1.position.set(-0.07, 0.48, 0);
+        prong1.rotation.z = 0.3;
+        const prong2 = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.16, 0.035), secondaryMat);
+        prong2.position.set(0.07, 0.48, 0);
+        prong2.rotation.z = -0.3;
+        const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.095, 0), glowMat);
+        orb.position.set(0, 0.54, 0);
+        const halo = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.015, 6, 16), primaryMat);
+        halo.position.set(0, 0.54, 0);
+        this.heldMeshGroup.add(shaft, prong1, prong2, orb, halo);
+        return;
+      }
+
+      // Repeater / Cannon / Railgun
+      const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.26), handleMat);
+      stock.position.set(0, 0.02, 0.06);
+      const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.12, 0.46), primaryMat);
+      barrel.position.set(0, 0.08, -0.16);
+      const railTop = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.42), secondaryMat);
+      railTop.position.set(0, 0.15, -0.16);
+      const muzzle = new THREE.Mesh(new THREE.OctahedronGeometry(0.075, 0), glowMat);
+      muzzle.position.set(0, 0.08, -0.4);
+      this.heldMeshGroup.add(stock, barrel, railTop, muzzle);
+
+      if (item.iconShape === 'repeater') {
+        const prod = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.035, 0.06), secondaryMat);
+        prod.position.set(0, 0.08, -0.32);
+        this.heldMeshGroup.add(prod);
+      }
       return;
     }
 
     // Default crystal/relic/potion held model
-    const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), primaryMat);
+    const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.15, 0), primaryMat);
     orb.position.set(0, 0.1, 0);
-    this.heldMeshGroup.add(orb);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.02, 6, 16), secondaryMat);
+    ring.position.set(0, 0.1, 0);
+    this.heldMeshGroup.add(orb, ring);
   }
 
   public grantTierSandboxKit(tier: ProgressionTier): boolean {

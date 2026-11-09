@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { sound } from '../audio/soundEngine';
-import { BOSSES, ITEMS, MONSTERS } from '../data/itemsAndBlocks';
+import { BLOCKS, BOSSES, ITEMS, MONSTERS } from '../data/itemsAndBlocks';
 import {
   ActiveProjectile,
   BossDef,
@@ -19,6 +19,7 @@ export interface ActiveMonster {
   maxHp: number;
   position: THREE.Vector3;
   velocity: THREE.Vector3;
+  onGround: boolean;
   yaw: number;
   rootGroup: THREE.Group;
   leftLeg: THREE.Object3D;
@@ -43,12 +44,15 @@ export interface ActiveBoss {
   phaseIndex: number;
   position: THREE.Vector3;
   velocity: THREE.Vector3;
+  onGround: boolean;
   yaw: number;
   rootGroup: THREE.Group;
   haloRing1: THREE.Object3D | null;
   haloRing2: THREE.Object3D | null;
   leftArm: THREE.Object3D;
   rightArm: THREE.Object3D;
+  leftLeg: THREE.Object3D;
+  rightLeg: THREE.Object3D;
   attackTimer: number;
   hitFlashTimer: number;
   statusPoisonTimer: number;
@@ -96,13 +100,15 @@ export class EntityManager {
     this.player = player;
   }
 
-  public update(dt: number): void {
-    // Natural monster spawning around player
-    this.spawnTimer -= dt;
-    if (this.spawnTimer <= 0) {
-      this.spawnTimer = this.activeBoss ? 6.5 : 3.2;
-      if (this.monsters.length < 12) {
-        this.spawnBiomeMonsterNearPlayer();
+  public update(dt: number, isNightTime = false): void {
+    // Natural monster spawning ONLY happens at night!
+    if (isNightTime) {
+      this.spawnTimer -= dt;
+      if (this.spawnTimer <= 0) {
+        this.spawnTimer = this.activeBoss ? 6.0 : 2.8;
+        if (this.monsters.length < 14) {
+          this.spawnBiomeMonsterNearPlayer();
+        }
       }
     }
 
@@ -145,6 +151,7 @@ export class EntityManager {
       maxHp: def.maxHp,
       position: pos.clone(),
       velocity: new THREE.Vector3(),
+      onGround: false,
       yaw: Math.random() * Math.PI * 2,
       rootGroup: built.rootGroup,
       leftLeg: built.leftLeg,
@@ -195,12 +202,15 @@ export class EntityManager {
       phaseIndex: 0,
       position: pos,
       velocity: new THREE.Vector3(),
+      onGround: false,
       yaw: 0,
       rootGroup: built.rootGroup,
       haloRing1: built.haloRing1,
       haloRing2: built.haloRing2,
       leftArm: built.leftArm,
       rightArm: built.rightArm,
+      leftLeg: built.leftLeg,
+      rightLeg: built.rightLeg,
       attackTimer: 2.0,
       hitFlashTimer: 0,
       statusPoisonTimer: 0,
@@ -308,12 +318,25 @@ export class EntityManager {
         m.velocity.z *= 0.88;
       }
 
-      // Move monster & keep on surface
-      m.position.x += m.velocity.x * dt;
-      m.position.z += m.velocity.z * dt;
-      const targetGroundY = this.world.getSurfaceHeight(Math.floor(m.position.x), Math.floor(m.position.z)) + 1;
-      const desiredY = m.def.canFly ? targetGroundY + 1.6 + Math.sin(performance.now() * 0.004 + m.uid) * 0.4 : targetGroundY;
-      m.position.y += (desiredY - m.position.y) * Math.min(1, 10 * dt);
+      // Move monster with real voxel collision & auto-jump over blocks!
+      const mobRadius = 0.36 * m.def.scale;
+      const mobHeight = 1.65 * m.def.scale;
+      if (m.def.canFly) {
+        m.position.x += m.velocity.x * dt;
+        m.position.z += m.velocity.z * dt;
+        const targetGroundY = this.world.getSurfaceHeight(Math.floor(m.position.x), Math.floor(m.position.z)) + 1;
+        const desiredY = targetGroundY + 1.6 + Math.sin(performance.now() * 0.004 + m.uid) * 0.45;
+        m.position.y += (desiredY - m.position.y) * Math.min(1, 8 * dt);
+      } else {
+        m.onGround = this.moveEntityWithAutoJump(
+          m.position,
+          m.velocity,
+          m.onGround,
+          mobRadius,
+          mobHeight,
+          dt
+        );
+      }
 
       m.rootGroup.position.copy(m.position);
       m.rootGroup.rotation.y = m.yaw;
@@ -332,6 +355,80 @@ export class EntityManager {
       m.hpBarFill.scale.x = hpRatio;
       m.hpBarFill.parent?.lookAt(this.player.camera.position);
     }
+  }
+
+  private checkEntityBlockCollision(px: number, py: number, pz: number, radius: number, height: number): boolean {
+    const minX = Math.floor(px - radius);
+    const maxX = Math.floor(px + radius);
+    const minY = Math.floor(py + 0.01);
+    const maxY = Math.floor(py + height - 0.01);
+    const minZ = Math.floor(pz - radius);
+    const maxZ = Math.floor(pz + radius);
+
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        for (let z = minZ; z <= maxZ; z++) {
+          const b = this.world.getBlock(x, y, z);
+          if (BLOCKS[b] && BLOCKS[b].solid) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  private moveEntityWithAutoJump(
+    pos: THREE.Vector3,
+    vel: THREE.Vector3,
+    onGround: boolean,
+    radius: number,
+    height: number,
+    dt: number
+  ): boolean {
+    vel.y -= 24.0 * dt;
+    let blockedHoriz = false;
+
+    // X axis
+    pos.x += vel.x * dt;
+    if (this.checkEntityBlockCollision(pos.x, pos.y, pos.z, radius, height)) {
+      pos.x -= vel.x * dt;
+      blockedHoriz = true;
+    }
+
+    // Z axis
+    pos.z += vel.z * dt;
+    if (this.checkEntityBlockCollision(pos.x, pos.y, pos.z, radius, height)) {
+      pos.z -= vel.z * dt;
+      blockedHoriz = true;
+    }
+
+    // Auto-jump when hitting a block obstacle while on the ground!
+    if (blockedHoriz && onGround) {
+      vel.y = 8.6;
+      onGround = false;
+    }
+
+    // Y axis
+    let groundedNow = false;
+    pos.y += vel.y * dt;
+    if (this.checkEntityBlockCollision(pos.x, pos.y, pos.z, radius, height)) {
+      if (vel.y < 0) {
+        groundedNow = true;
+        pos.y = Math.floor(pos.y) + 1.0001;
+      } else {
+        pos.y -= vel.y * dt;
+      }
+      vel.y = 0;
+    }
+
+    if (pos.y < 2) {
+      pos.y = this.world.getSurfaceHeight(Math.floor(pos.x), Math.floor(pos.z)) + 1.5;
+      vel.y = 0;
+      groundedNow = true;
+    }
+
+    return groundedNow;
   }
 
   private updateBoss(dt: number): void {
@@ -389,17 +486,35 @@ export class EntityManager {
       }
     }
 
-    b.position.x += b.velocity.x * dt;
-    b.position.z += b.velocity.z * dt;
-    const groundY = this.world.getSurfaceHeight(Math.floor(b.position.x), Math.floor(b.position.z)) + 1;
-    const floatOffset =
-      b.def.modelType === 'void_boss' || b.def.modelType === 'astral_boss'
-        ? 2.2 + Math.sin(performance.now() * 0.003) * 0.6
-        : 0;
-    b.position.y += (groundY + floatOffset - b.position.y) * Math.min(1, 8 * dt);
+    const isFloatingBoss = b.def.modelType === 'void_boss' || b.def.modelType === 'astral_boss';
+    if (isFloatingBoss) {
+      b.position.x += b.velocity.x * dt;
+      b.position.z += b.velocity.z * dt;
+      const groundY = this.world.getSurfaceHeight(Math.floor(b.position.x), Math.floor(b.position.z)) + 1;
+      const floatOffset = 2.2 + Math.sin(performance.now() * 0.003) * 0.6;
+      b.position.y += (groundY + floatOffset - b.position.y) * Math.min(1, 8 * dt);
+    } else {
+      b.onGround = this.moveEntityWithAutoJump(
+        b.position,
+        b.velocity,
+        b.onGround,
+        0.75 * b.def.scale,
+        2.6 * b.def.scale,
+        dt
+      );
+    }
 
     b.rootGroup.position.copy(b.position);
     b.rootGroup.rotation.y = b.yaw;
+
+    // Boss walk limb animation
+    const walkCycle = performance.now() * 0.008 * b.def.speed;
+    const isMoving = Math.hypot(b.velocity.x, b.velocity.z) > 0.35;
+    const legSwing = isMoving ? Math.sin(walkCycle) * 0.5 : 0;
+    b.leftLeg.rotation.x = legSwing;
+    b.rightLeg.rotation.x = -legSwing;
+    b.leftArm.rotation.x += (-legSwing * 0.45 - b.leftArm.rotation.x) * Math.min(1, 8 * dt);
+    b.rightArm.rotation.x += (legSwing * 0.45 - b.rightArm.rotation.x) * Math.min(1, 8 * dt);
 
     // Rotate boss halo rings if present
     if (b.haloRing1) {
@@ -1178,54 +1293,254 @@ export class EntityManager {
     const s = def.scale;
 
     const bodyMat = new THREE.MeshLambertMaterial({ color: def.bodyColor });
+    const darkMat = new THREE.MeshLambertMaterial({ color: '#18181b' });
+    const boneMat = new THREE.MeshLambertMaterial({ color: '#f8fafc' });
     const accentMat = new THREE.MeshLambertMaterial({
       color: def.accentColor,
       emissive: def.accentColor,
-      emissiveIntensity: 0.25,
+      emissiveIntensity: 0.3,
     });
     const eyeMat = new THREE.MeshBasicMaterial({ color: def.eyeColor });
 
-    // Torso
-    const isQuadruped = def.modelType === 'boar' || def.modelType === 'crawler';
-    const torso = new THREE.Mesh(
-      new THREE.BoxGeometry(isQuadruped ? 0.9 * s : 0.75 * s, isQuadruped ? 0.65 * s : 1.0 * s, isQuadruped ? 1.2 * s : 0.48 * s),
-      bodyMat
-    );
-    torso.position.y = isQuadruped ? 0.65 * s : 1.0 * s;
-    rootGroup.add(torso);
+    // Pivot groups for limbs so they rotate from hip/shoulder joints
+    const leftLeg = new THREE.Group();
+    const rightLeg = new THREE.Group();
+    const leftArm = new THREE.Group();
+    const rightArm = new THREE.Group();
 
-    // Head + Glowing Eyes + Horns/Crystals
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.58 * s, 0.58 * s, 0.58 * s), bodyMat);
-    head.position.set(0, isQuadruped ? 0.9 * s : 1.78 * s, isQuadruped ? 0.65 * s : 0);
-    rootGroup.add(head);
+    if (def.modelType === 'boar') {
+      // 4-legged Bramble Tusk-Boar with hunched spine, snout, curved tusks, ears & dorsal bramble spikes
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.85 * s, 0.65 * s, 1.25 * s), bodyMat);
+      body.position.set(0, 0.72 * s, 0);
+      const hump = new THREE.Mesh(new THREE.BoxGeometry(0.76 * s, 0.25 * s, 0.65 * s), bodyMat);
+      hump.position.set(0, 1.1 * s, 0.2 * s);
+      rootGroup.add(body, hump);
 
-    const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 0.1 * s, 0.05 * s), eyeMat);
-    eyeL.position.set(-0.14 * s, 0.06 * s, 0.3 * s);
-    const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 0.1 * s, 0.05 * s), eyeMat);
-    eyeR.position.set(0.14 * s, 0.06 * s, 0.3 * s);
-    head.add(eyeL, eyeR);
+      // Dorsal Bramble Spines along back
+      for (let i = 0; i < 4; i++) {
+        const spine = new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, 0.32 * s, 4), accentMat);
+        spine.position.set(0, 1.22 * s - i * 0.04 * s, 0.35 * s - i * 0.28 * s);
+        spine.rotation.x = -0.35;
+        rootGroup.add(spine);
+      }
 
-    // Crest / Horns / Crystal spikes
-    const crest = new THREE.Mesh(new THREE.BoxGeometry(0.7 * s, 0.22 * s, 0.22 * s), accentMat);
-    crest.position.set(0, 0.35 * s, 0);
-    head.add(crest);
+      // Boar Head + Snout + Tusks
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.68 * s, 0.56 * s, 0.58 * s), bodyMat);
+      head.position.set(0, 0.82 * s, 0.78 * s);
+      const snout = new THREE.Mesh(new THREE.BoxGeometry(0.42 * s, 0.32 * s, 0.34 * s), darkMat);
+      snout.position.set(0, -0.08 * s, 0.38 * s);
+      const tuskL = new THREE.Mesh(new THREE.ConeGeometry(0.065 * s, 0.34 * s, 4), boneMat);
+      tuskL.position.set(-0.22 * s, 0.02 * s, 0.42 * s);
+      tuskL.rotation.x = 0.4;
+      tuskL.rotation.z = 0.25;
+      const tuskR = new THREE.Mesh(new THREE.ConeGeometry(0.065 * s, 0.34 * s, 4), boneMat);
+      tuskR.position.set(0.22 * s, 0.02 * s, 0.42 * s);
+      tuskR.rotation.x = 0.4;
+      tuskR.rotation.z = -0.25;
+      const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.11 * s, 0.1 * s, 0.06 * s), eyeMat);
+      eyeL.position.set(-0.24 * s, 0.1 * s, 0.28 * s);
+      const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.11 * s, 0.1 * s, 0.06 * s), eyeMat);
+      eyeR.position.set(0.24 * s, 0.1 * s, 0.28 * s);
+      head.add(snout, tuskL, tuskR, eyeL, eyeR);
+      rootGroup.add(head);
 
-    // Limbs
-    const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.26 * s, 0.6 * s, 0.26 * s), accentMat);
-    leftLeg.position.set(-0.22 * s, 0.3 * s, 0);
-    const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.26 * s, 0.6 * s, 0.26 * s), accentMat);
-    rightLeg.position.set(0.22 * s, 0.3 * s, 0);
+      // 4 Hoofed Legs (hind legs = leftLeg/rightLeg, front legs = leftArm/rightArm)
+      leftLeg.position.set(-0.28 * s, 0.45 * s, -0.42 * s);
+      rightLeg.position.set(0.28 * s, 0.45 * s, -0.42 * s);
+      leftArm.position.set(-0.28 * s, 0.45 * s, 0.42 * s);
+      rightArm.position.set(0.28 * s, 0.45 * s, 0.42 * s);
+      [leftLeg, rightLeg, leftArm, rightArm].forEach((limb) => {
+        const legMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22 * s, 0.46 * s, 0.22 * s), bodyMat);
+        legMesh.position.y = -0.22 * s;
+        const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.24 * s, 0.1 * s, 0.25 * s), darkMat);
+        hoof.position.y = -0.42 * s;
+        limb.add(legMesh, hoof);
+      });
+      rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
+    } else if (def.modelType === 'crawler') {
+      // Multi-legged Arachnid/Scorpion Cryo-Crawler with crystal clusters & pincers
+      const thorax = new THREE.Mesh(new THREE.BoxGeometry(0.75 * s, 0.45 * s, 0.75 * s), bodyMat);
+      thorax.position.set(0, 0.52 * s, 0.18 * s);
+      const abdomen = new THREE.Mesh(new THREE.BoxGeometry(0.95 * s, 0.62 * s, 0.95 * s), bodyMat);
+      abdomen.position.set(0, 0.68 * s, -0.55 * s);
+      abdomen.rotation.x = 0.2;
+      rootGroup.add(thorax, abdomen);
 
-    const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.24 * s, 0.75 * s, 0.24 * s), accentMat);
-    leftArm.position.set(-0.52 * s, 1.1 * s, 0);
-    const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.24 * s, 0.75 * s, 0.24 * s), accentMat);
-    rightArm.position.set(0.52 * s, 1.1 * s, 0);
+      // Glowing Cryo Crystals sprouting from abdomen
+      for (let c = 0; c < 3; c++) {
+        const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.24 * s, 0), accentMat);
+        shard.scale.set(0.7, 1.8, 0.7);
+        shard.position.set((c - 1) * 0.26 * s, 1.08 * s, -0.55 * s - (c % 2) * 0.15 * s);
+        shard.rotation.z = (c - 1) * 0.35;
+        rootGroup.add(shard);
+      }
 
-    rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
+      // Spider Eyes & Mandibles
+      for (let e = -1; e <= 1; e += 2) {
+        const mainEye = new THREE.Mesh(new THREE.BoxGeometry(0.13 * s, 0.12 * s, 0.08 * s), eyeMat);
+        mainEye.position.set(e * 0.18 * s, 0.6 * s, 0.58 * s);
+        const sideEye = new THREE.Mesh(new THREE.BoxGeometry(0.08 * s, 0.08 * s, 0.08 * s), eyeMat);
+        sideEye.position.set(e * 0.32 * s, 0.64 * s, 0.52 * s);
+        const mandible = new THREE.Mesh(new THREE.ConeGeometry(0.09 * s, 0.35 * s, 4), accentMat);
+        mandible.position.set(e * 0.22 * s, 0.42 * s, 0.72 * s);
+        mandible.rotation.x = Math.PI * 0.45;
+        mandible.rotation.z = -e * 0.3;
+        rootGroup.add(mainEye, sideEye, mandible);
+      }
+
+      // Jointed Spider Legs
+      leftLeg.position.set(-0.38 * s, 0.48 * s, -0.2 * s);
+      rightLeg.position.set(0.38 * s, 0.48 * s, -0.2 * s);
+      leftArm.position.set(-0.38 * s, 0.48 * s, 0.25 * s);
+      rightArm.position.set(0.38 * s, 0.48 * s, 0.25 * s);
+      [
+        { grp: leftLeg, side: -1 },
+        { grp: rightLeg, side: 1 },
+        { grp: leftArm, side: -1 },
+        { grp: rightArm, side: 1 },
+      ].forEach(({ grp, side }) => {
+        for (let pair = 0; pair < 2; pair++) {
+          const zOff = (pair - 0.5) * 0.28 * s;
+          const femur = new THREE.Mesh(new THREE.BoxGeometry(0.42 * s, 0.12 * s, 0.12 * s), accentMat);
+          femur.position.set(side * 0.2 * s, 0.08 * s, zOff);
+          femur.rotation.z = side * 0.45;
+          const tibia = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 0.52 * s, 0.12 * s), bodyMat);
+          tibia.position.set(side * 0.42 * s, -0.22 * s, zOff);
+          tibia.rotation.z = -side * 0.2;
+          grp.add(femur, tibia);
+        }
+      });
+      rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
+    } else if (def.modelType === 'wraith' || def.modelType === 'sentinel') {
+      // Floating Wraith / Celestial Star-Sentinel
+      if (def.modelType === 'sentinel') {
+        const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.45 * s, 0), bodyMat);
+        core.position.set(0, 1.35 * s, 0);
+        const eyeLens = new THREE.Mesh(new THREE.OctahedronGeometry(0.22 * s, 0), eyeMat);
+        eyeLens.position.set(0, 1.35 * s, 0.34 * s);
+        const halo = new THREE.Mesh(new THREE.TorusGeometry(0.65 * s, 0.06 * s, 6, 20), accentMat);
+        halo.position.set(0, 1.35 * s, 0);
+        rootGroup.add(core, eyeLens, halo);
+
+        // Floating Wing Shields
+        leftArm.position.set(-0.75 * s, 1.45 * s, 0);
+        rightArm.position.set(0.75 * s, 1.45 * s, 0);
+        const wingL = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.95 * s, 0.42 * s), accentMat);
+        const wingR = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.95 * s, 0.42 * s), accentMat);
+        leftArm.add(wingL);
+        rightArm.add(wingR);
+        rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
+      } else {
+        // Permafrost Wraith: Hooded cloak + glowing ribcage core + trailing ice ribbons
+        const cloak = new THREE.Mesh(new THREE.ConeGeometry(0.55 * s, 1.35 * s, 6), bodyMat);
+        cloak.position.set(0, 1.15 * s, 0);
+        const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.28 * s, 0), accentMat);
+        core.position.set(0, 1.2 * s, 0.15 * s);
+        const hood = new THREE.Mesh(new THREE.BoxGeometry(0.56 * s, 0.56 * s, 0.56 * s), bodyMat);
+        hood.position.set(0, 1.85 * s, 0.05 * s);
+        const crown = new THREE.Mesh(new THREE.ConeGeometry(0.32 * s, 0.4 * s, 4), accentMat);
+        crown.position.set(0, 0.42 * s, 0);
+        const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.09 * s, 0.06 * s), eyeMat);
+        eyeL.position.set(-0.13 * s, 0.02 * s, 0.29 * s);
+        const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.09 * s, 0.06 * s), eyeMat);
+        eyeR.position.set(0.13 * s, 0.02 * s, 0.29 * s);
+        hood.add(crown, eyeL, eyeR);
+
+        leftArm.position.set(-0.56 * s, 1.55 * s, 0.1 * s);
+        rightArm.position.set(0.56 * s, 1.55 * s, 0.1 * s);
+        const clawL = new THREE.Mesh(new THREE.ConeGeometry(0.15 * s, 0.65 * s, 4), accentMat);
+        clawL.rotation.x = Math.PI;
+        clawL.position.y = -0.3 * s;
+        const clawR = new THREE.Mesh(new THREE.ConeGeometry(0.15 * s, 0.65 * s, 4), accentMat);
+        clawR.rotation.x = Math.PI;
+        clawR.position.y = -0.3 * s;
+        leftArm.add(clawL);
+        rightArm.add(clawR);
+
+        rootGroup.add(cloak, core, hood, leftLeg, rightLeg, leftArm, rightArm);
+      }
+    } else {
+      // Bipedal Monsters: Sylvan Stalker, Moss Golem, Magma Brute, Void Reaver
+      const isHeavy = def.modelType === 'golem' || def.modelType === 'brute';
+      const chestW = isHeavy ? 0.98 * s : 0.68 * s;
+      const chestH = isHeavy ? 0.92 * s : 0.78 * s;
+      const chestD = isHeavy ? 0.58 * s : 0.42 * s;
+
+      // Pelvis + Chest + Glowing Core/Runes
+      const pelvis = new THREE.Mesh(new THREE.BoxGeometry(chestW * 0.78, 0.32 * s, chestD * 0.85), darkMat);
+      pelvis.position.set(0, 0.78 * s, 0);
+      const chest = new THREE.Mesh(new THREE.BoxGeometry(chestW, chestH, chestD), bodyMat);
+      chest.position.set(0, 1.32 * s, 0);
+      const chestPlate = new THREE.Mesh(new THREE.BoxGeometry(chestW * 0.65, chestH * 0.55, chestD + 0.06 * s), accentMat);
+      chestPlate.position.set(0, 1.36 * s, 0);
+      rootGroup.add(pelvis, chest, chestPlate);
+
+      // Head + Helmet/Horns/Eyes
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.56 * s, 0.56 * s, 0.56 * s), bodyMat);
+      head.position.set(0, 2.02 * s, 0);
+      const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.1 * s, 0.06 * s), eyeMat);
+      eyeL.position.set(-0.14 * s, 0.05 * s, 0.29 * s);
+      const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.1 * s, 0.06 * s), eyeMat);
+      eyeR.position.set(0.14 * s, 0.05 * s, 0.29 * s);
+      head.add(eyeL, eyeR);
+
+      if (def.modelType === 'brute' || def.modelType === 'reaver') {
+        const hornL = new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, 0.45 * s, 4), accentMat);
+        hornL.position.set(-0.32 * s, 0.34 * s, 0);
+        hornL.rotation.z = 0.45;
+        const hornR = new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, 0.45 * s, 4), accentMat);
+        hornR.position.set(0.32 * s, 0.34 * s, 0);
+        hornR.rotation.z = -0.45;
+        head.add(hornL, hornR);
+      } else {
+        const crest = new THREE.Mesh(new THREE.BoxGeometry(0.66 * s, 0.24 * s, 0.36 * s), accentMat);
+        crest.position.set(0, 0.34 * s, 0);
+        head.add(crest);
+      }
+      rootGroup.add(head);
+
+      // Articulated Legs
+      leftLeg.position.set(-chestW * 0.28, 0.68 * s, 0);
+      rightLeg.position.set(chestW * 0.28, 0.68 * s, 0);
+      [leftLeg, rightLeg].forEach((leg) => {
+        const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.28 * s, 0.68 * s, 0.28 * s), bodyMat);
+        thigh.position.y = -0.34 * s;
+        const boot = new THREE.Mesh(new THREE.BoxGeometry(0.31 * s, 0.22 * s, 0.34 * s), accentMat);
+        boot.position.set(0, -0.58 * s, 0.04 * s);
+        leg.add(thigh, boot);
+      });
+
+      // Articulated Arms + Pauldrons + Held Monster Weapons!
+      leftArm.position.set(-(chestW * 0.5 + 0.18 * s), 1.66 * s, 0);
+      rightArm.position.set(chestW * 0.5 + 0.18 * s, 1.66 * s, 0);
+      [leftArm, rightArm].forEach((arm, idx) => {
+        const pauldron = new THREE.Mesh(new THREE.BoxGeometry(0.36 * s, 0.28 * s, 0.36 * s), accentMat);
+        pauldron.position.y = 0.05 * s;
+        const forearm = new THREE.Mesh(
+          new THREE.BoxGeometry((isHeavy ? 0.32 : 0.22) * s, 0.78 * s, (isHeavy ? 0.32 : 0.22) * s),
+          bodyMat
+        );
+        forearm.position.y = -0.38 * s;
+        arm.add(pauldron, forearm);
+
+        // Give Void Reavers dual glowing blades & Magma Brutes a volcanic club!
+        if (def.modelType === 'reaver') {
+          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06 * s, 0.12 * s, 0.85 * s), accentMat);
+          blade.position.set(0, -0.72 * s, 0.38 * s);
+          arm.add(blade);
+        } else if (def.modelType === 'brute' && idx === 1) {
+          const club = new THREE.Mesh(new THREE.BoxGeometry(0.24 * s, 0.24 * s, 0.9 * s), accentMat);
+          club.position.set(0, -0.72 * s, 0.35 * s);
+          arm.add(club);
+        }
+      });
+
+      rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
+    }
 
     // Floating 3D Health Bar above monster
     const hpGroup = new THREE.Group();
-    hpGroup.position.set(0, 2.35 * s, 0);
+    hpGroup.position.set(0, 2.55 * s, 0);
     const bgBar = new THREE.Mesh(
       new THREE.PlaneGeometry(1.1, 0.13),
       new THREE.MeshBasicMaterial({ color: '#1e293b', side: THREE.DoubleSide })
@@ -1247,74 +1562,132 @@ export class EntityManager {
     haloRing2: THREE.Object3D | null;
     leftArm: THREE.Object3D;
     rightArm: THREE.Object3D;
+    leftLeg: THREE.Object3D;
+    rightLeg: THREE.Object3D;
   } {
     const rootGroup = new THREE.Group();
     const s = def.scale;
 
     const bodyMat = new THREE.MeshLambertMaterial({ color: def.bodyColor });
+    const darkMat = new THREE.MeshLambertMaterial({ color: '#090d16' });
     const accentMat = new THREE.MeshLambertMaterial({
       color: def.accentColor,
       emissive: def.accentColor,
-      emissiveIntensity: 0.4,
+      emissiveIntensity: 0.42,
     });
     const glowMat = new THREE.MeshBasicMaterial({ color: def.glowColor });
 
-    // Towering Armored Torso + Glowing Boss Core
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(1.2 * s, 1.5 * s, 0.75 * s), bodyMat);
-    torso.position.y = 1.4 * s;
+    // Multi-layered Armored Boss Torso + Ribcage Plates + Glowing Heart Core
+    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.95 * s, 0.38 * s, 0.62 * s), darkMat);
+    pelvis.position.y = 0.92 * s;
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(1.28 * s, 1.38 * s, 0.78 * s), bodyMat);
+    torso.position.y = 1.65 * s;
+    const chestArmor = new THREE.Mesh(new THREE.BoxGeometry(1.36 * s, 0.65 * s, 0.84 * s), accentMat);
+    chestArmor.position.y = 1.88 * s;
     const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.42 * s, 0), glowMat);
-    core.position.set(0, 1.45 * s, 0.38 * s);
-    rootGroup.add(torso, core);
+    core.position.set(0, 1.65 * s, 0.42 * s);
+    rootGroup.add(pelvis, torso, chestArmor, core);
 
-    // Crowned Boss Head
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.75 * s, 0.75 * s, 0.75 * s), bodyMat);
-    head.position.set(0, 2.55 * s, 0);
-    const crown = new THREE.Mesh(new THREE.BoxGeometry(1.15 * s, 0.35 * s, 0.4 * s), accentMat);
-    crown.position.set(0, 0.45 * s, 0);
-    const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.55 * s, 0.14 * s, 0.06 * s), glowMat);
-    eyes.position.set(0, 0.05 * s, 0.39 * s);
-    head.add(crown, eyes);
+    // Boss Head + Horns / Antlers / Seraph Crown + Visor Eyes
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.76 * s, 0.76 * s, 0.76 * s), bodyMat);
+    head.position.set(0, 2.72 * s, 0);
+    const crown = new THREE.Mesh(new THREE.BoxGeometry(1.12 * s, 0.32 * s, 0.44 * s), accentMat);
+    crown.position.set(0, 0.44 * s, 0);
+    const hornL = new THREE.Mesh(new THREE.ConeGeometry(0.16 * s, 0.75 * s, 4), glowMat);
+    hornL.position.set(-0.48 * s, 0.68 * s, 0);
+    hornL.rotation.z = 0.35;
+    const hornR = new THREE.Mesh(new THREE.ConeGeometry(0.16 * s, 0.75 * s, 4), glowMat);
+    hornR.position.set(0.48 * s, 0.68 * s, 0);
+    hornR.rotation.z = -0.35;
+    const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.58 * s, 0.15 * s, 0.08 * s), glowMat);
+    eyes.position.set(0, 0.06 * s, 0.39 * s);
+    head.add(crown, hornL, hornR, eyes);
     rootGroup.add(head);
 
-    // Pauldrons & Giant Arms
+    // 6 Articulated Wings for Aethelgard / Void Boss, or Back Spires for Titans
+    if (def.modelType === 'astral_boss' || def.modelType === 'void_boss') {
+      const wingPairs = def.modelType === 'astral_boss' ? 3 : 2;
+      for (let w = 0; w < wingPairs; w++) {
+        for (const side of [-1, 1]) {
+          const wing = new THREE.Mesh(new THREE.BoxGeometry(1.45 * s, 0.24 * s, 0.08 * s), w % 2 === 0 ? accentMat : glowMat);
+          wing.position.set(side * 1.15 * s, (2.25 - w * 0.42) * s, -0.42 * s);
+          wing.rotation.z = side * (0.35 - w * 0.22);
+          wing.rotation.y = -side * 0.25;
+          rootGroup.add(wing);
+        }
+      }
+    } else {
+      // Back Crystal / Magma / Canopy Spires
+      for (const side of [-1, 1]) {
+        const spire = new THREE.Mesh(new THREE.ConeGeometry(0.24 * s, 0.95 * s, 5), accentMat);
+        spire.position.set(side * 0.45 * s, 2.35 * s, -0.45 * s);
+        spire.rotation.x = -0.4;
+        spire.rotation.z = -side * 0.25;
+        rootGroup.add(spire);
+      }
+    }
+
+    // Pauldrons, Giant Arms & Signature Boss Weapon in Right Hand
     const leftArm = new THREE.Group();
-    leftArm.position.set(-0.92 * s, 1.9 * s, 0);
-    const lLimb = new THREE.Mesh(new THREE.BoxGeometry(0.45 * s, 1.35 * s, 0.45 * s), accentMat);
-    lLimb.position.y = -0.45 * s;
-    leftArm.add(lLimb);
+    leftArm.position.set(-0.96 * s, 2.15 * s, 0);
+    const lPauldron = new THREE.Mesh(new THREE.BoxGeometry(0.58 * s, 0.45 * s, 0.58 * s), accentMat);
+    const lLimb = new THREE.Mesh(new THREE.BoxGeometry(0.44 * s, 1.32 * s, 0.44 * s), bodyMat);
+    lLimb.position.y = -0.62 * s;
+    const lGauntlet = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.42 * s, 0.5 * s), accentMat);
+    lGauntlet.position.y = -1.1 * s;
+    leftArm.add(lPauldron, lLimb, lGauntlet);
 
     const rightArm = new THREE.Group();
-    rightArm.position.set(0.92 * s, 1.9 * s, 0);
-    const rLimb = new THREE.Mesh(new THREE.BoxGeometry(0.45 * s, 1.35 * s, 0.45 * s), accentMat);
-    rLimb.position.y = -0.45 * s;
-    rightArm.add(rLimb);
+    rightArm.position.set(0.96 * s, 2.15 * s, 0);
+    const rPauldron = new THREE.Mesh(new THREE.BoxGeometry(0.58 * s, 0.45 * s, 0.58 * s), accentMat);
+    const rLimb = new THREE.Mesh(new THREE.BoxGeometry(0.44 * s, 1.32 * s, 0.44 * s), bodyMat);
+    rLimb.position.y = -0.62 * s;
+    const rGauntlet = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.42 * s, 0.5 * s), accentMat);
+    rGauntlet.position.y = -1.1 * s;
+    // Boss Great-Weapon held in right hand
+    const weapShaft = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.14 * s, 1.85 * s), darkMat);
+    weapShaft.position.set(0, -1.15 * s, 0.65 * s);
+    const weapBlade = new THREE.Mesh(new THREE.BoxGeometry(0.32 * s, 0.65 * s, 0.95 * s), glowMat);
+    weapBlade.position.set(0, -1.15 * s, 1.45 * s);
+    rightArm.add(rPauldron, rLimb, rGauntlet, weapShaft, weapBlade);
 
-    // Legs
-    const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.45 * s, 0.9 * s, 0.45 * s), bodyMat);
-    leftLeg.position.set(-0.35 * s, 0.45 * s, 0);
-    const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.45 * s, 0.9 * s, 0.45 * s), bodyMat);
-    rightLeg.position.set(0.35 * s, 0.45 * s, 0);
+    // Articulated Boss Legs
+    const leftLeg = new THREE.Group();
+    leftLeg.position.set(-0.38 * s, 0.9 * s, 0);
+    const lLegMesh = new THREE.Mesh(new THREE.BoxGeometry(0.46 * s, 0.9 * s, 0.46 * s), bodyMat);
+    lLegMesh.position.y = -0.45 * s;
+    const lBoot = new THREE.Mesh(new THREE.BoxGeometry(0.52 * s, 0.28 * s, 0.56 * s), accentMat);
+    lBoot.position.set(0, -0.76 * s, 0.05 * s);
+    leftLeg.add(lLegMesh, lBoot);
+
+    const rightLeg = new THREE.Group();
+    rightLeg.position.set(0.38 * s, 0.9 * s, 0);
+    const rLegMesh = new THREE.Mesh(new THREE.BoxGeometry(0.46 * s, 0.9 * s, 0.46 * s), bodyMat);
+    rLegMesh.position.y = -0.45 * s;
+    const rBoot = new THREE.Mesh(new THREE.BoxGeometry(0.52 * s, 0.28 * s, 0.56 * s), accentMat);
+    rBoot.position.set(0, -0.76 * s, 0.05 * s);
+    rightLeg.add(rLegMesh, rBoot);
 
     rootGroup.add(leftArm, rightArm, leftLeg, rightLeg);
 
     // Rotating Halo / Cryo / Astral Rings for bosses
     const haloRing1 = new THREE.Mesh(
-      new THREE.TorusGeometry(1.35 * s, 0.08 * s, 8, 24),
+      new THREE.TorusGeometry(1.38 * s, 0.08 * s, 8, 24),
       accentMat
     );
-    haloRing1.position.set(0, 1.8 * s, -0.3 * s);
+    haloRing1.position.set(0, 1.95 * s, -0.35 * s);
     rootGroup.add(haloRing1);
 
     let haloRing2: THREE.Object3D | null = null;
     if (def.tier >= 5) {
       haloRing2 = new THREE.Mesh(
-        new THREE.TorusGeometry(1.75 * s, 0.07 * s, 8, 24),
+        new THREE.TorusGeometry(1.78 * s, 0.07 * s, 8, 24),
         glowMat
       );
-      haloRing2.position.set(0, 1.8 * s, -0.3 * s);
+      haloRing2.position.set(0, 1.95 * s, -0.35 * s);
       rootGroup.add(haloRing2);
     }
 
-    return { rootGroup, haloRing1, haloRing2, leftArm, rightArm };
+    return { rootGroup, haloRing1, haloRing2, leftArm, rightArm, leftLeg, rightLeg };
   }
 }

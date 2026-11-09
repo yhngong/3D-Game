@@ -24,6 +24,8 @@ class AethelgardGame {
   private ambientLight!: THREE.AmbientLight;
   private playerLight!: THREE.PointLight;
   private starField!: THREE.Points;
+  private sunMesh!: THREE.Mesh;
+  private moonMesh!: THREE.Mesh;
 
   private targetBoxWire!: THREE.LineSegments;
   private crackOverlayMesh!: THREE.Mesh;
@@ -32,7 +34,8 @@ class AethelgardGame {
   private miningVoxelKey = '';
   private miningProgress = 0;
   private hitSoundCooldown = 0;
-  private timeOfDay = 0.28; // 0..1 cycle
+  private timeOfDay = 0.22; // 0..0.5 = Day, 0.5..1.0 = Night
+  private wasNightTime = false;
 
   constructor() {
     this.initScene();
@@ -85,6 +88,19 @@ class AethelgardGame {
       new THREE.PointsMaterial({ color: '#fde047', size: 0.8, transparent: true, opacity: 0.7 })
     );
     this.scene.add(this.starField);
+
+    // 3D Orbiting Sun & Moon Meshes for the Daylight Cycle
+    this.sunMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(9, 9, 9),
+      new THREE.MeshBasicMaterial({ color: '#fef08a' })
+    );
+    this.scene.add(this.sunMesh);
+
+    this.moonMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(7, 7, 7),
+      new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
+    );
+    this.scene.add(this.moonMesh);
 
     // Target Voxel Wireframe Box
     const boxGeo = new THREE.BoxGeometry(1.006, 1.006, 1.006);
@@ -205,6 +221,11 @@ class AethelgardGame {
       }
       if (e.code === 'KeyQ') {
         this.player.triggerDash();
+      }
+      if (e.code === 'KeyT') {
+        // Toggle between Midday (0.25) and Midnight (0.75)
+        const isNight = Math.sin(this.timeOfDay * Math.PI * 2) < 0;
+        this.timeOfDay = isNight ? 0.22 : 0.72;
       }
 
       // Hotbar keys 1..9
@@ -411,15 +432,57 @@ class AethelgardGame {
     return { targetBlockId: hit.blockId, progress: this.miningProgress };
   }
 
-  private updateAtmosphere(dt: number): void {
-    this.timeOfDay = (this.timeOfDay + dt * 0.004) % 1.0;
+  private updateAtmosphere(dt: number): boolean {
+    // Full Day-Night cycle every ~140 seconds (70s Day, 70s Night)
+    this.timeOfDay = (this.timeOfDay + dt * 0.007) % 1.0;
     const sunAngle = this.timeOfDay * Math.PI * 2;
     const sunHeight = Math.sin(sunAngle);
+    const sunHoriz = Math.cos(sunAngle);
+    const isNightTime = sunHeight < 0;
+
+    if (isNightTime !== this.wasNightTime) {
+      this.wasNightTime = isNightTime;
+      if (isNightTime) {
+        this.ui.showBanner(
+          '🌙 NIGHT FALLS OVER AETHELGARD',
+          'Hostile Monsters are now spawning in the darkness!',
+          '#c084fc'
+        );
+      } else {
+        this.ui.showBanner(
+          '☀️ DAWN BREAKS',
+          'Sunlight returns — natural monster spawning has stopped.',
+          '#fde047'
+        );
+      }
+    }
+
+    // Position orbiting 3D Sun and Moon around player
+    const orbitRadius = 95;
+    this.sunMesh.position.set(
+      this.player.position.x + sunHoriz * orbitRadius,
+      sunHeight * orbitRadius,
+      this.player.position.z - 25
+    );
+    this.moonMesh.position.set(
+      this.player.position.x - sunHoriz * orbitRadius,
+      -sunHeight * orbitRadius,
+      this.player.position.z - 25
+    );
+    this.sunLight.position.copy(this.sunMesh.position);
+
+    // Adjust sunlight & ambient intensity for Day vs Night
+    const dayFactor = Math.max(0, sunHeight);
+    this.sunLight.intensity = 0.2 + dayFactor * 1.05;
+    this.ambientLight.intensity = 0.28 + dayFactor * 0.45;
+    (this.starField.material as THREE.PointsMaterial).opacity = isNightTime
+      ? Math.min(0.9, -sunHeight * 1.2)
+      : 0.08;
 
     this.playerLight.position.copy(this.player.camera.position);
     this.starField.position.set(this.player.position.x, 0, this.player.position.z);
 
-    // Biome & Boss dynamic sky tinting
+    // Biome & Day/Night dynamic sky tinting
     const biome = this.world.getBiomeAt(this.player.position.x, this.player.position.z);
     let skyColor = new THREE.Color('#38bdf8');
     if (this.entities.activeBoss) {
@@ -435,12 +498,18 @@ class AethelgardGame {
       skyColor = new THREE.Color('#7dd3fc');
     }
 
-    if (sunHeight < 0 && !this.entities.activeBoss) {
-      skyColor.lerp(new THREE.Color('#090d16'), Math.min(0.8, -sunHeight));
+    // Sunset/Dawn warm glow near horizon
+    if (Math.abs(sunHeight) < 0.22 && !this.entities.activeBoss) {
+      skyColor.lerp(new THREE.Color('#f97316'), 0.45);
+    }
+
+    if (isNightTime && !this.entities.activeBoss) {
+      skyColor.lerp(new THREE.Color('#060913'), Math.min(0.88, -sunHeight * 1.15));
     }
 
     (this.scene.background as THREE.Color).lerp(skyColor, Math.min(1, dt * 2.5));
     (this.scene.fog as THREE.FogExp2).color.copy(this.scene.background as THREE.Color);
+    return isNightTime;
   }
 
   private animate(): void {
@@ -454,10 +523,10 @@ class AethelgardGame {
       if (!this.ui.isMenuOpen) {
         this.player.update(dt);
         this.world.updateChunksAroundPlayer(this.player.position.x, this.player.position.z, 3);
-        this.entities.update(dt);
+        const isNightTime = this.updateAtmosphere(dt);
+        this.entities.update(dt, isNightTime);
         const miningState = this.updateMiningAndTargeting(dt);
-        this.updateAtmosphere(dt);
-        this.ui.updateHud(miningState.targetBlockId, miningState.progress);
+        this.ui.updateHud(miningState.targetBlockId, miningState.progress, isNightTime, this.timeOfDay);
       }
 
       this.renderer.render(this.scene, this.camera);

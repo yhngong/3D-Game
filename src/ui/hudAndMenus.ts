@@ -25,6 +25,7 @@ export class HudAndMenuManager {
   private manaTextEl!: HTMLElement;
   private armorBadgeEl!: HTMLElement;
   private dashBadgeEl!: HTMLElement;
+  private daylightBadgeEl!: HTMLElement;
 
   private bossBarContainer!: HTMLElement;
   private bossNameEl!: HTMLElement;
@@ -97,6 +98,7 @@ export class HudAndMenuManager {
         <div class="badges-row">
           <span id="armor-badge" class="hud-badge">DEF: 12%</span>
           <span id="dash-badge" class="hud-badge dash-ready">[Q] Dash Ready</span>
+          <span id="daylight-badge" class="hud-badge">☀️ Day (Safe)</span>
         </div>
       </div>
 
@@ -120,6 +122,7 @@ export class HudAndMenuManager {
         <div class="tracker-keys">
           <span><kbd>E</kbd> Forge & Bag</span>
           <span><kbd>P</kbd> Boss Codex</span>
+          <span><kbd>T</kbd> Day/Night</span>
           <span><kbd>RMB</kbd> Ability / Place</span>
         </div>
       </div>
@@ -161,6 +164,7 @@ export class HudAndMenuManager {
     this.manaTextEl = document.getElementById('mana-text')!;
     this.armorBadgeEl = document.getElementById('armor-badge')!;
     this.dashBadgeEl = document.getElementById('dash-badge')!;
+    this.daylightBadgeEl = document.getElementById('daylight-badge')!;
 
     this.bossBarContainer = document.getElementById('boss-bar-container')!;
     this.bossNameEl = document.getElementById('boss-name')!;
@@ -351,8 +355,13 @@ export class HudAndMenuManager {
     this.renderModalContent();
   }
 
-  public updateHud(targetBlockId: BlockId | null, breakProgress: number): void {
-    // Player HP / MP / Armor / Dash
+  public updateHud(
+    targetBlockId: BlockId | null,
+    breakProgress: number,
+    isNightTime = false,
+    timeOfDay = 0.25
+  ): void {
+    // Player HP / MP / Armor / Dash / Daylight Cycle
     const hpPct = Math.max(0, Math.min(100, (this.player.hp / this.player.maxHp) * 100));
     this.hpFillEl.style.width = `${hpPct}%`;
     this.hpTextEl.textContent = `${Math.ceil(this.player.hp)} / ${this.player.maxHp}`;
@@ -370,6 +379,20 @@ export class HudAndMenuManager {
     } else {
       this.dashBadgeEl.textContent = `[Q] Dash: ${this.player.dashCooldownTimer.toFixed(1)}s`;
       this.dashBadgeEl.className = 'hud-badge';
+    }
+
+    // Format 24-hour clock from timeOfDay (0 = 6:00 AM, 0.25 = 12:00 PM, 0.5 = 6:00 PM, 0.75 = 12:00 AM)
+    const totalHours = Math.floor(((timeOfDay * 24 + 6) % 24));
+    const displayHour = totalHours % 12 === 0 ? 12 : totalHours % 12;
+    const amPm = totalHours >= 12 ? 'PM' : 'AM';
+    if (isNightTime) {
+      this.daylightBadgeEl.textContent = `🌙 Night (${displayHour}:00 ${amPm}) — Monsters Spawning!`;
+      this.daylightBadgeEl.style.borderColor = '#c084fc';
+      this.daylightBadgeEl.style.color = '#e9d5ff';
+    } else {
+      this.daylightBadgeEl.textContent = `☀️ Day (${displayHour}:00 ${amPm}) — Safe`;
+      this.daylightBadgeEl.style.borderColor = '#fde047';
+      this.daylightBadgeEl.style.color = '#fef08a';
     }
 
     // Target Block & Mining Progress
