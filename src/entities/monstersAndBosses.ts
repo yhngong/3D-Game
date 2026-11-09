@@ -26,6 +26,8 @@ export interface ActiveMonster {
   rightLeg: THREE.Object3D;
   leftArm: THREE.Object3D;
   rightArm: THREE.Object3D;
+  extraAnimObj: THREE.Object3D | null;
+  secondaryAnimObj: THREE.Object3D | null;
   hpBarFill: THREE.Mesh;
   attackTimer: number;
   hitFlashTimer: number;
@@ -215,6 +217,8 @@ export class EntityManager {
       rightLeg: built.rightLeg,
       leftArm: built.leftArm,
       rightArm: built.rightArm,
+      extraAnimObj: built.extraAnimObj,
+      secondaryAnimObj: built.secondaryAnimObj,
       hpBarFill: built.hpBarFill,
       attackTimer: 1.0,
       hitFlashTimer: 0,
@@ -503,14 +507,52 @@ export class EntityManager {
       m.rootGroup.position.copy(m.position);
       m.rootGroup.rotation.y = m.yaw;
 
-      // Limb walk animation
-      const walkCycle = performance.now() * 0.01 * m.def.speed;
+      // Limb & creature-specific secondary animations
+      const nowT = performance.now() * 0.001;
+      const walkCycle = nowT * 10 * m.def.speed;
       const isMoving = Math.hypot(m.velocity.x, m.velocity.z) > 0.4;
       const swing = isMoving ? Math.sin(walkCycle) * 0.65 : 0;
-      m.leftLeg.rotation.x = swing;
-      m.rightLeg.rotation.x = -swing;
-      m.leftArm.rotation.x += (-swing * 0.6 - m.leftArm.rotation.x) * Math.min(1, 10 * dt);
-      m.rightArm.rotation.x += (swing * 0.6 - m.rightArm.rotation.x) * Math.min(1, 10 * dt);
+
+      if (m.def.modelType === 'crawler') {
+        // Arachnid scuttling legs + pincer snap + bobbing scorpion stinger tail
+        m.leftLeg.rotation.z = swing * 0.45;
+        m.rightLeg.rotation.z = -swing * 0.45;
+        m.leftArm.rotation.y += (Math.sin(nowT * 6 + m.uid) * 0.25 - m.leftArm.rotation.y) * Math.min(1, 8 * dt);
+        m.rightArm.rotation.y += (-Math.sin(nowT * 6 + m.uid) * 0.25 - m.rightArm.rotation.y) * Math.min(1, 8 * dt);
+        if (m.extraAnimObj) {
+          m.extraAnimObj.rotation.x = Math.sin(nowT * 4.5 + m.uid) * 0.18;
+        }
+      } else if (m.def.modelType === 'sentinel') {
+        // Hovering seraph wing pulse + counter-rotating gyroscope rings
+        const pulse = Math.sin(nowT * 4 + m.uid) * 0.22;
+        m.leftArm.rotation.z = pulse;
+        m.rightArm.rotation.z = -pulse;
+        if (m.extraAnimObj) {
+          m.extraAnimObj.rotation.z += dt * 2.2;
+          m.extraAnimObj.rotation.x += dt * 1.1;
+        }
+        if (m.secondaryAnimObj) {
+          m.secondaryAnimObj.rotation.y -= dt * 2.6;
+          m.secondaryAnimObj.rotation.z -= dt * 0.9;
+        }
+      } else {
+        m.leftLeg.rotation.x = swing;
+        m.rightLeg.rotation.x = -swing;
+        m.leftArm.rotation.x += (-swing * 0.6 - m.leftArm.rotation.x) * Math.min(1, 10 * dt);
+        m.rightArm.rotation.x += (swing * 0.6 - m.rightArm.rotation.x) * Math.min(1, 10 * dt);
+
+        if (m.extraAnimObj) {
+          if (m.def.modelType === 'boar') {
+            m.extraAnimObj.rotation.z = Math.sin(nowT * 9) * 0.35;
+          } else {
+            m.extraAnimObj.rotation.y += dt * 2.6;
+            m.extraAnimObj.rotation.z += dt * 1.2;
+          }
+        }
+        if (m.secondaryAnimObj) {
+          m.secondaryAnimObj.rotation.x = Math.sin(nowT * 4.5 + m.uid) * 0.2;
+        }
+      }
 
       // Update floating health bar orientation
       const hpRatio = Math.max(0.01, m.hp / m.maxHp);
@@ -2375,260 +2417,607 @@ export class EntityManager {
     rightLeg: THREE.Object3D;
     leftArm: THREE.Object3D;
     rightArm: THREE.Object3D;
+    extraAnimObj: THREE.Object3D | null;
+    secondaryAnimObj: THREE.Object3D | null;
     hpBarFill: THREE.Mesh;
   } {
     const rootGroup = new THREE.Group();
     const s = def.scale;
 
     const bodyMat = new THREE.MeshLambertMaterial({ color: def.bodyColor });
-    const darkMat = new THREE.MeshLambertMaterial({ color: '#18181b' });
+    const darkMat = new THREE.MeshLambertMaterial({ color: '#111827' });
     const boneMat = new THREE.MeshLambertMaterial({ color: '#f8fafc' });
     const accentMat = new THREE.MeshLambertMaterial({
       color: def.accentColor,
       emissive: def.accentColor,
-      emissiveIntensity: 0.3,
+      emissiveIntensity: 0.38,
     });
     const eyeMat = new THREE.MeshBasicMaterial({ color: def.eyeColor });
 
-    // Pivot groups for limbs so they rotate from hip/shoulder joints
     const leftLeg = new THREE.Group();
     const rightLeg = new THREE.Group();
     const leftArm = new THREE.Group();
     const rightArm = new THREE.Group();
+    let extraAnimObj: THREE.Object3D | null = null;
+    let secondaryAnimObj: THREE.Object3D | null = null;
 
     if (def.modelType === 'boar') {
-      // 4-legged Bramble Tusk-Boar with hunched spine, snout, curved tusks, ears & dorsal bramble spikes
-      const body = new THREE.Mesh(new THREE.BoxGeometry(0.85 * s, 0.65 * s, 1.25 * s), bodyMat);
-      body.position.set(0, 0.72 * s, 0);
-      const hump = new THREE.Mesh(new THREE.BoxGeometry(0.76 * s, 0.25 * s, 0.65 * s), bodyMat);
-      hump.position.set(0, 1.1 * s, 0.2 * s);
-      rootGroup.add(body, hump);
+      // =====================================================
+      // 1. BRAMBLE TUSK-BOAR: Armored Razorback War-Beast
+      // =====================================================
+      const ribcage = new THREE.Mesh(new THREE.BoxGeometry(0.92 * s, 0.72 * s, 0.92 * s), bodyMat);
+      ribcage.position.set(0, 0.78 * s, 0.22 * s);
+      const haunch = new THREE.Mesh(new THREE.BoxGeometry(0.76 * s, 0.58 * s, 0.68 * s), bodyMat);
+      haunch.position.set(0, 0.7 * s, -0.45 * s);
+      const shoulderMane = new THREE.Mesh(new THREE.DodecahedronGeometry(0.52 * s, 0), darkMat);
+      shoulderMane.scale.set(1.05, 0.75, 1.15);
+      shoulderMane.position.set(0, 1.08 * s, 0.28 * s);
+      const vineSaddle = new THREE.Mesh(new THREE.BoxGeometry(0.98 * s, 0.22 * s, 0.36 * s), accentMat);
+      vineSaddle.position.set(0, 0.85 * s, 0.12 * s);
+      rootGroup.add(ribcage, haunch, shoulderMane, vineSaddle);
 
-      // Dorsal Bramble Spines along back
-      for (let i = 0; i < 4; i++) {
-        const spine = new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, 0.32 * s, 4), accentMat);
-        spine.position.set(0, 1.22 * s - i * 0.04 * s, 0.35 * s - i * 0.28 * s);
-        spine.rotation.x = -0.35;
+      // 6 Jagged Emerald Bramble Crystal Spines down the razorback
+      for (let i = 0; i < 6; i++) {
+        const spine = new THREE.Mesh(new THREE.ConeGeometry(0.11 * s, (0.44 - i * 0.04) * s, 4), accentMat);
+        spine.position.set(0, (1.36 - i * 0.06) * s, (0.48 - i * 0.24) * s);
+        spine.rotation.x = -0.42;
         rootGroup.add(spine);
       }
 
-      // Boar Head + Snout + Tusks
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.68 * s, 0.56 * s, 0.58 * s), bodyMat);
-      head.position.set(0, 0.82 * s, 0.78 * s);
-      const snout = new THREE.Mesh(new THREE.BoxGeometry(0.42 * s, 0.32 * s, 0.34 * s), darkMat);
-      snout.position.set(0, -0.08 * s, 0.38 * s);
-      const tuskL = new THREE.Mesh(new THREE.ConeGeometry(0.065 * s, 0.34 * s, 4), boneMat);
-      tuskL.position.set(-0.22 * s, 0.02 * s, 0.42 * s);
-      tuskL.rotation.x = 0.4;
-      tuskL.rotation.z = 0.25;
-      const tuskR = new THREE.Mesh(new THREE.ConeGeometry(0.065 * s, 0.34 * s, 4), boneMat);
-      tuskR.position.set(0.22 * s, 0.02 * s, 0.42 * s);
-      tuskR.rotation.x = 0.4;
-      tuskR.rotation.z = -0.25;
-      const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.11 * s, 0.1 * s, 0.06 * s), eyeMat);
-      eyeL.position.set(-0.24 * s, 0.1 * s, 0.28 * s);
-      const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.11 * s, 0.1 * s, 0.06 * s), eyeMat);
-      eyeR.position.set(0.24 * s, 0.1 * s, 0.28 * s);
-      head.add(snout, tuskL, tuskR, eyeL, eyeR);
+      // Armored Boar Skull + Flared Ears + Snout + 4 Curved War-Tusks
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.72 * s, 0.58 * s, 0.62 * s), bodyMat);
+      head.position.set(0, 0.84 * s, 0.86 * s);
+      const browArmor = new THREE.Mesh(new THREE.BoxGeometry(0.76 * s, 0.16 * s, 0.38 * s), darkMat);
+      browArmor.position.set(0, 0.24 * s, 0.14 * s);
+      browArmor.rotation.x = 0.2;
+      const snout = new THREE.Mesh(new THREE.BoxGeometry(0.46 * s, 0.34 * s, 0.42 * s), darkMat);
+      snout.position.set(0, -0.1 * s, 0.42 * s);
+      head.add(browArmor, snout);
+
+      for (const side of [-1, 1]) {
+        const ear = new THREE.Mesh(new THREE.BoxGeometry(0.18 * s, 0.24 * s, 0.1 * s), bodyMat);
+        ear.position.set(side * 0.38 * s, 0.28 * s, -0.08 * s);
+        ear.rotation.z = -side * 0.5;
+        const mainTusk = new THREE.Mesh(new THREE.ConeGeometry(0.08 * s, 0.52 * s, 4), boneMat);
+        mainTusk.position.set(side * 0.28 * s, 0.04 * s, 0.52 * s);
+        mainTusk.rotation.x = 0.45;
+        mainTusk.rotation.z = -side * 0.32;
+        const subTusk = new THREE.Mesh(new THREE.ConeGeometry(0.05 * s, 0.28 * s, 4), accentMat);
+        subTusk.position.set(side * 0.22 * s, -0.1 * s, 0.58 * s);
+        subTusk.rotation.x = 0.7;
+        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.11 * s, 0.08 * s), eyeMat);
+        eye.position.set(side * 0.28 * s, 0.1 * s, 0.3 * s);
+        head.add(ear, mainTusk, subTusk, eye);
+      }
       rootGroup.add(head);
 
-      // 4 Hoofed Legs (hind legs = leftLeg/rightLeg, front legs = leftArm/rightArm)
-      leftLeg.position.set(-0.28 * s, 0.45 * s, -0.42 * s);
-      rightLeg.position.set(0.28 * s, 0.45 * s, -0.42 * s);
-      leftArm.position.set(-0.28 * s, 0.45 * s, 0.42 * s);
-      rightArm.position.set(0.28 * s, 0.45 * s, 0.42 * s);
+      // Wagging Thorny Tail
+      const tailGroup = new THREE.Group();
+      tailGroup.position.set(0, 0.85 * s, -0.78 * s);
+      const tailStem = new THREE.Mesh(new THREE.BoxGeometry(0.1 * s, 0.1 * s, 0.36 * s), darkMat);
+      tailStem.position.set(0, 0.05 * s, -0.16 * s);
+      const tailMace = new THREE.Mesh(new THREE.OctahedronGeometry(0.16 * s, 0), accentMat);
+      tailMace.position.set(0, 0.08 * s, -0.36 * s);
+      tailGroup.add(tailStem, tailMace);
+      extraAnimObj = tailGroup;
+      rootGroup.add(tailGroup);
+
+      // 4 Muscled Cloven War-Legs
+      leftLeg.position.set(-0.32 * s, 0.5 * s, -0.46 * s);
+      rightLeg.position.set(0.32 * s, 0.5 * s, -0.46 * s);
+      leftArm.position.set(-0.34 * s, 0.52 * s, 0.44 * s);
+      rightArm.position.set(0.34 * s, 0.52 * s, 0.44 * s);
       [leftLeg, rightLeg, leftArm, rightArm].forEach((limb) => {
-        const legMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22 * s, 0.46 * s, 0.22 * s), bodyMat);
-        legMesh.position.y = -0.22 * s;
-        const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.24 * s, 0.1 * s, 0.25 * s), darkMat);
-        hoof.position.y = -0.42 * s;
-        limb.add(legMesh, hoof);
+        const upper = new THREE.Mesh(new THREE.BoxGeometry(0.26 * s, 0.32 * s, 0.28 * s), bodyMat);
+        upper.position.y = -0.14 * s;
+        const shin = new THREE.Mesh(new THREE.BoxGeometry(0.2 * s, 0.28 * s, 0.2 * s), darkMat);
+        shin.position.y = -0.34 * s;
+        const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.25 * s, 0.12 * s, 0.28 * s), accentMat);
+        hoof.position.set(0, -0.46 * s, 0.03 * s);
+        limb.add(upper, shin, hoof);
       });
       rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
-    } else if (def.modelType === 'crawler') {
-      // Multi-legged Arachnid/Scorpion Cryo-Crawler with crystal clusters & pincers
-      const thorax = new THREE.Mesh(new THREE.BoxGeometry(0.75 * s, 0.45 * s, 0.75 * s), bodyMat);
-      thorax.position.set(0, 0.52 * s, 0.18 * s);
-      const abdomen = new THREE.Mesh(new THREE.BoxGeometry(0.95 * s, 0.62 * s, 0.95 * s), bodyMat);
-      abdomen.position.set(0, 0.68 * s, -0.55 * s);
-      abdomen.rotation.x = 0.2;
-      rootGroup.add(thorax, abdomen);
+    } else if (def.modelType === 'stalker') {
+      // =====================================================
+      // 2. SYLVAN BRIAR-STALKER: Antlered Mantis Forest-Predator
+      // =====================================================
+      const abdomen = new THREE.Mesh(new THREE.ConeGeometry(0.36 * s, 0.95 * s, 5), darkMat);
+      abdomen.position.set(0, 0.95 * s, -0.32 * s);
+      abdomen.rotation.x = -0.85;
+      const thorax = new THREE.Mesh(new THREE.BoxGeometry(0.58 * s, 0.85 * s, 0.44 * s), bodyMat);
+      thorax.position.set(0, 1.38 * s, 0.08 * s);
+      thorax.rotation.x = 0.32;
+      const heartPod = new THREE.Mesh(new THREE.OctahedronGeometry(0.22 * s, 0), eyeMat);
+      heartPod.position.set(0, 1.38 * s, 0.28 * s);
+      rootGroup.add(abdomen, thorax, heartPod);
 
-      // Glowing Cryo Crystals sprouting from abdomen
-      for (let c = 0; c < 3; c++) {
-        const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.24 * s, 0), accentMat);
-        shard.scale.set(0.7, 1.8, 0.7);
-        shard.position.set((c - 1) * 0.26 * s, 1.08 * s, -0.55 * s - (c % 2) * 0.15 * s);
-        shard.rotation.z = (c - 1) * 0.35;
+      // Fluttering Leaf-Cloak Strips on Back
+      const cloakGrp = new THREE.Group();
+      cloakGrp.position.set(0, 1.68 * s, -0.1 * s);
+      for (let c = -1; c <= 1; c++) {
+        const strip = new THREE.Mesh(new THREE.BoxGeometry(0.22 * s, 0.95 * s, 0.05 * s), accentMat);
+        strip.position.set(c * 0.22 * s, -0.45 * s, -0.18 * s);
+        strip.rotation.x = 0.28;
+        strip.rotation.z = c * 0.14;
+        cloakGrp.add(strip);
+      }
+      secondaryAnimObj = cloakGrp;
+      rootGroup.add(cloakGrp);
+
+      // Predatory Skull Mask + 4-Tine Stag Antlers + Slanted Hunter Eyes
+      const skull = new THREE.Mesh(new THREE.OctahedronGeometry(0.38 * s, 0), boneMat);
+      skull.scale.set(0.95, 0.9, 1.25);
+      skull.position.set(0, 1.94 * s, 0.26 * s);
+      for (const side of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.16 * s, 0.08 * s, 0.12 * s), eyeMat);
+        eye.position.set(side * 0.18 * s, 0.04 * s, 0.28 * s);
+        eye.rotation.z = -side * 0.25;
+        const mainBeam = new THREE.Mesh(new THREE.ConeGeometry(0.065 * s, 0.72 * s, 4), accentMat);
+        mainBeam.position.set(side * 0.28 * s, 0.42 * s, -0.05 * s);
+        mainBeam.rotation.z = -side * 0.45;
+        mainBeam.rotation.x = -0.25;
+        const tine = new THREE.Mesh(new THREE.ConeGeometry(0.05 * s, 0.42 * s, 4), accentMat);
+        tine.position.set(side * 0.42 * s, 0.52 * s, 0.15 * s);
+        tine.rotation.x = 0.55;
+        tine.rotation.z = -side * 0.25;
+        skull.add(eye, mainBeam, tine);
+      }
+      rootGroup.add(skull);
+
+      // Digitigrade Raptor Hind Legs
+      leftLeg.position.set(-0.24 * s, 0.85 * s, -0.06 * s);
+      rightLeg.position.set(0.24 * s, 0.85 * s, -0.06 * s);
+      for (const leg of [leftLeg, rightLeg]) {
+        const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.2 * s, 0.48 * s, 0.22 * s), bodyMat);
+        thigh.position.set(0, -0.2 * s, 0.08 * s);
+        thigh.rotation.x = -0.4;
+        const shin = new THREE.Mesh(new THREE.BoxGeometry(0.15 * s, 0.52 * s, 0.16 * s), darkMat);
+        shin.position.set(0, -0.58 * s, -0.04 * s);
+        shin.rotation.x = 0.35;
+        const talon = new THREE.Mesh(new THREE.ConeGeometry(0.12 * s, 0.28 * s, 4), accentMat);
+        talon.rotation.x = Math.PI / 2;
+        talon.position.set(0, -0.8 * s, 0.14 * s);
+        leg.add(thigh, shin, talon);
+      }
+
+      // Dual Curved Emerald Mantis-Scythe Forelimbs!
+      leftArm.position.set(-0.42 * s, 1.65 * s, 0.18 * s);
+      rightArm.position.set(0.42 * s, 1.65 * s, 0.18 * s);
+      for (const arm of [leftArm, rightArm]) {
+        const humerus = new THREE.Mesh(new THREE.BoxGeometry(0.16 * s, 0.55 * s, 0.18 * s), bodyMat);
+        humerus.position.set(0, -0.22 * s, 0.15 * s);
+        humerus.rotation.x = 0.65;
+        const scytheBlade = new THREE.Mesh(new THREE.ConeGeometry(0.14 * s, 0.98 * s, 4), accentMat);
+        scytheBlade.scale.set(0.38, 1.0, 1.15);
+        scytheBlade.position.set(0, -0.58 * s, 0.45 * s);
+        scytheBlade.rotation.x = 2.35;
+        arm.add(humerus, scytheBlade);
+      }
+      rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
+    } else if (def.modelType === 'golem') {
+      // =====================================================
+      // 3. ANCIENT MOSS GOLEM: Hollow-Core Runic Stone Construct
+      // =====================================================
+      const waistBoulder = new THREE.Mesh(new THREE.DodecahedronGeometry(0.42 * s, 0), darkMat);
+      waistBoulder.position.set(0, 0.82 * s, 0);
+      // Hollow Stone Rib-Frame surrounding a Levitating Spinning Rune-Heart!
+      const leftPillar = new THREE.Mesh(new THREE.BoxGeometry(0.36 * s, 0.95 * s, 0.58 * s), bodyMat);
+      leftPillar.position.set(-0.42 * s, 1.42 * s, 0);
+      const rightPillar = new THREE.Mesh(new THREE.BoxGeometry(0.36 * s, 0.95 * s, 0.58 * s), bodyMat);
+      rightPillar.position.set(0.42 * s, 1.42 * s, 0);
+      const shoulderArch = new THREE.Mesh(new THREE.BoxGeometry(1.28 * s, 0.34 * s, 0.68 * s), bodyMat);
+      shoulderArch.position.set(0, 1.88 * s, 0);
+      const mossMantle = new THREE.Mesh(new THREE.BoxGeometry(1.34 * s, 0.16 * s, 0.72 * s), accentMat);
+      mossMantle.position.set(0, 2.04 * s, 0);
+      rootGroup.add(waistBoulder, leftPillar, rightPillar, shoulderArch, mossMantle);
+
+      // Levitating Spinning Emerald Rune-Heart inside Chest Cavity!
+      const coreGrp = new THREE.Group();
+      coreGrp.position.set(0, 1.42 * s, 0.05 * s);
+      const runeHeart = new THREE.Mesh(new THREE.OctahedronGeometry(0.28 * s, 0), eyeMat);
+      const runeRing = new THREE.Mesh(new THREE.TorusGeometry(0.38 * s, 0.045 * s, 6, 16), accentMat);
+      coreGrp.add(runeHeart, runeRing);
+      extraAnimObj = coreGrp;
+      rootGroup.add(coreGrp);
+
+      // Sunken Monolith Visor Head + Sprouting Shoulder Crystals
+      const monolithHead = new THREE.Mesh(new THREE.BoxGeometry(0.54 * s, 0.48 * s, 0.52 * s), bodyMat);
+      monolithHead.position.set(0, 2.24 * s, 0.08 * s);
+      const visorEye = new THREE.Mesh(new THREE.BoxGeometry(0.42 * s, 0.11 * s, 0.08 * s), eyeMat);
+      visorEye.position.set(0, 0.02 * s, 0.25 * s);
+      monolithHead.add(visorEye);
+      const crystalSpire = new THREE.Mesh(new THREE.OctahedronGeometry(0.24 * s, 0), accentMat);
+      crystalSpire.scale.set(0.65, 1.8, 0.65);
+      crystalSpire.position.set(-0.55 * s, 2.28 * s, -0.1 * s);
+      crystalSpire.rotation.z = 0.35;
+      rootGroup.add(monolithHead, crystalSpire);
+
+      // Heavy Stone Pillar Legs
+      leftLeg.position.set(-0.34 * s, 0.72 * s, 0);
+      rightLeg.position.set(0.34 * s, 0.72 * s, 0);
+      for (const leg of [leftLeg, rightLeg]) {
+        const stoneLeg = new THREE.Mesh(new THREE.BoxGeometry(0.36 * s, 0.72 * s, 0.42 * s), bodyMat);
+        stoneLeg.position.y = -0.36 * s;
+        const mossCuff = new THREE.Mesh(new THREE.BoxGeometry(0.4 * s, 0.16 * s, 0.46 * s), accentMat);
+        mossCuff.position.y = -0.58 * s;
+        leg.add(stoneLeg, mossCuff);
+      }
+
+      // Colossal Asymmetric Vine-Wrapped Boulder Gauntlets
+      leftArm.position.set(-0.82 * s, 1.82 * s, 0);
+      rightArm.position.set(0.82 * s, 1.82 * s, 0);
+      for (const arm of [leftArm, rightArm]) {
+        const pauldron = new THREE.Mesh(new THREE.DodecahedronGeometry(0.34 * s, 0), bodyMat);
+        const vineCord = new THREE.Mesh(new THREE.BoxGeometry(0.22 * s, 0.68 * s, 0.22 * s), accentMat);
+        vineCord.position.y = -0.45 * s;
+        const boulderFist = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.56 * s, 0.52 * s), bodyMat);
+        boulderFist.position.set(0, -0.95 * s, 0.08 * s);
+        const knuckleGlow = new THREE.Mesh(new THREE.BoxGeometry(0.54 * s, 0.14 * s, 0.16 * s), eyeMat);
+        knuckleGlow.position.set(0, -1.12 * s, 0.28 * s);
+        arm.add(pauldron, vineCord, boulderFist, knuckleGlow);
+      }
+      rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
+    } else if (def.modelType === 'crawler') {
+      // =====================================================
+      // 4. CRYO-CRYSTAL CRAWLER: Glacial Scorpion-Arachnid
+      // =====================================================
+      const cephalothorax = new THREE.Mesh(new THREE.BoxGeometry(0.84 * s, 0.46 * s, 0.84 * s), bodyMat);
+      cephalothorax.position.set(0, 0.52 * s, 0.22 * s);
+      const abdomen = new THREE.Mesh(new THREE.DodecahedronGeometry(0.58 * s, 0), bodyMat);
+      abdomen.scale.set(1.05, 0.78, 1.25);
+      abdomen.position.set(0, 0.68 * s, -0.56 * s);
+      rootGroup.add(cephalothorax, abdomen);
+
+      // Erupting Translucent Cryo-Crystal Cluster on Carapace
+      for (let c = 0; c < 4; c++) {
+        const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.24 * s, 0), c % 2 === 0 ? accentMat : eyeMat);
+        shard.scale.set(0.65, 2.0, 0.65);
+        shard.position.set(((c % 3) - 1) * 0.26 * s, 1.12 * s, -0.48 * s - c * 0.12 * s);
+        shard.rotation.z = ((c % 3) - 1) * 0.42;
+        shard.rotation.x = -0.25;
         rootGroup.add(shard);
       }
 
-      // Spider Eyes & Mandibles
-      for (let e = -1; e <= 1; e += 2) {
-        const mainEye = new THREE.Mesh(new THREE.BoxGeometry(0.13 * s, 0.12 * s, 0.08 * s), eyeMat);
-        mainEye.position.set(e * 0.18 * s, 0.6 * s, 0.58 * s);
-        const sideEye = new THREE.Mesh(new THREE.BoxGeometry(0.08 * s, 0.08 * s, 0.08 * s), eyeMat);
-        sideEye.position.set(e * 0.32 * s, 0.64 * s, 0.52 * s);
-        const mandible = new THREE.Mesh(new THREE.ConeGeometry(0.09 * s, 0.35 * s, 4), accentMat);
-        mandible.position.set(e * 0.22 * s, 0.42 * s, 0.72 * s);
-        mandible.rotation.x = Math.PI * 0.45;
-        mandible.rotation.z = -e * 0.3;
-        rootGroup.add(mainEye, sideEye, mandible);
+      // Arching 5-Segment Scorpion Stinger Tail curving overhead!
+      const stingerGroup = new THREE.Group();
+      stingerGroup.position.set(0, 0.85 * s, -0.95 * s);
+      const tailCoords = [
+        [0, 0.25, -0.2, 0.4],
+        [0, 0.62, -0.28, 0.1],
+        [0, 0.98, -0.1, -0.4],
+        [0, 1.22, 0.25, -0.9],
+      ];
+      for (const [tx, ty, tz, rx] of tailCoords) {
+        const tSeg = new THREE.Mesh(new THREE.BoxGeometry(0.24 * s, 0.36 * s, 0.24 * s), bodyMat);
+        tSeg.position.set(tx * s, ty * s, tz * s);
+        tSeg.rotation.x = rx;
+        stingerGroup.add(tSeg);
+      }
+      const stingerBarb = new THREE.Mesh(new THREE.ConeGeometry(0.16 * s, 0.55 * s, 4), eyeMat);
+      stingerBarb.position.set(0, 1.26 * s, 0.62 * s);
+      stingerBarb.rotation.x = Math.PI * 0.62;
+      stingerGroup.add(stingerBarb);
+      extraAnimObj = stingerGroup;
+      rootGroup.add(stingerGroup);
+
+      // 6 Glowing Arachnid Eyes
+      for (const side of [-1, 1]) {
+        for (let e = 0; e < 3; e++) {
+          const eye = new THREE.Mesh(new THREE.BoxGeometry(0.1 * s, 0.09 * s, 0.08 * s), eyeMat);
+          eye.position.set(side * (0.14 + e * 0.12) * s, (0.58 + e * 0.04) * s, (0.64 - e * 0.06) * s);
+          rootGroup.add(eye);
+        }
       }
 
-      // Jointed Spider Legs
-      leftLeg.position.set(-0.38 * s, 0.48 * s, -0.2 * s);
-      rightLeg.position.set(0.38 * s, 0.48 * s, -0.2 * s);
-      leftArm.position.set(-0.38 * s, 0.48 * s, 0.25 * s);
-      rightArm.position.set(0.38 * s, 0.48 * s, 0.25 * s);
-      [
-        { grp: leftLeg, side: -1 },
-        { grp: rightLeg, side: 1 },
+      // Giant Snapping Ice-Crab Pincer Claws (leftArm & rightArm)
+      leftArm.position.set(-0.42 * s, 0.52 * s, 0.52 * s);
+      rightArm.position.set(0.42 * s, 0.52 * s, 0.52 * s);
+      for (const { clawGrp, side } of [
+        { clawGrp: leftArm, side: -1 },
+        { clawGrp: rightArm, side: 1 },
+      ]) {
+        const armSeg = new THREE.Mesh(new THREE.BoxGeometry(0.18 * s, 0.16 * s, 0.46 * s), bodyMat);
+        armSeg.position.set(side * 0.12 * s, 0, 0.22 * s);
+        armSeg.rotation.y = -side * 0.3;
+        const pincerOuter = new THREE.Mesh(new THREE.ConeGeometry(0.15 * s, 0.58 * s, 4), accentMat);
+        pincerOuter.rotation.x = Math.PI * 0.5;
+        pincerOuter.rotation.z = side * 0.25;
+        pincerOuter.position.set(side * 0.22 * s, 0, 0.62 * s);
+        const pincerInner = new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, 0.42 * s, 4), eyeMat);
+        pincerInner.rotation.x = Math.PI * 0.5;
+        pincerInner.rotation.z = -side * 0.35;
+        pincerInner.position.set(side * 0.04 * s, -0.04 * s, 0.58 * s);
+        clawGrp.add(armSeg, pincerOuter, pincerInner);
+      }
+
+      // 8 Jointed Scuttling Spider Legs (4 per side)
+      leftLeg.position.set(-0.4 * s, 0.48 * s, -0.12 * s);
+      rightLeg.position.set(0.4 * s, 0.48 * s, -0.12 * s);
+      for (const { legGrp, side } of [
+        { legGrp: leftLeg, side: -1 },
+        { legGrp: rightLeg, side: 1 },
+      ]) {
+        for (let k = 0; k < 4; k++) {
+          const zOff = (k - 1.5) * 0.26 * s;
+          const femur = new THREE.Mesh(new THREE.BoxGeometry(0.52 * s, 0.11 * s, 0.11 * s), accentMat);
+          femur.position.set(side * 0.22 * s, 0.12 * s, zOff);
+          femur.rotation.z = side * 0.48;
+          const tibia = new THREE.Mesh(new THREE.ConeGeometry(0.08 * s, 0.62 * s, 4), bodyMat);
+          tibia.position.set(side * 0.52 * s, -0.2 * s, zOff);
+          tibia.rotation.z = Math.PI + side * 0.18;
+          legGrp.add(femur, tibia);
+        }
+      }
+      rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
+    } else if (def.modelType === 'wraith') {
+      // =====================================================
+      // 5. PERMAFROST WRAITH: Crowned Spectral Ice-Reaper Lich
+      // =====================================================
+      const outerShroud = new THREE.Mesh(new THREE.ConeGeometry(0.62 * s, 1.48 * s, 6), bodyMat);
+      outerShroud.position.set(0, 1.08 * s, 0);
+      outerShroud.rotation.x = Math.PI;
+      // Exposed Spectral Ice Ribcage + Spinning Soul-Crystal!
+      for (let r = 0; r < 3; r++) {
+        const rib = new THREE.Mesh(new THREE.TorusGeometry((0.36 - r * 0.04) * s, 0.035 * s, 5, 12, Math.PI * 1.3), boneMat);
+        rib.position.set(0, (1.48 - r * 0.16) * s, 0.08 * s);
+        rib.rotation.x = Math.PI / 2;
+        rib.rotation.z = -Math.PI * 0.15;
+        rootGroup.add(rib);
+      }
+      const soulHeart = new THREE.Mesh(new THREE.OctahedronGeometry(0.22 * s, 0), eyeMat);
+      soulHeart.position.set(0, 1.35 * s, 0.14 * s);
+      extraAnimObj = soulHeart;
+      rootGroup.add(outerShroud, soulHeart);
+
+      // Trailing Spectral Ice Ribbons
+      const ribbonGrp = new THREE.Group();
+      ribbonGrp.position.set(0, 1.4 * s, -0.25 * s);
+      for (const side of [-1, 1]) {
+        const tailRibbon = new THREE.Mesh(new THREE.ConeGeometry(0.16 * s, 1.1 * s, 4), accentMat);
+        tailRibbon.position.set(side * 0.26 * s, -0.55 * s, -0.15 * s);
+        tailRibbon.rotation.x = Math.PI - 0.3;
+        ribbonGrp.add(tailRibbon);
+      }
+      secondaryAnimObj = ribbonGrp;
+      rootGroup.add(ribbonGrp);
+
+      // Hooded Skull + 3-Spire Glacial Crown
+      const hood = new THREE.Mesh(new THREE.BoxGeometry(0.56 * s, 0.56 * s, 0.56 * s), darkMat);
+      hood.position.set(0, 1.94 * s, 0.06 * s);
+      for (let sp = -1; sp <= 1; sp++) {
+        const crownSpike = new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, (sp === 0 ? 0.56 : 0.4) * s, 4), accentMat);
+        crownSpike.position.set(sp * 0.2 * s, 0.45 * s, 0);
+        crownSpike.rotation.z = -sp * 0.28;
+        hood.add(crownSpike);
+      }
+      for (const side of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.15 * s, 0.09 * s, 0.08 * s), eyeMat);
+        eye.position.set(side * 0.14 * s, 0.02 * s, 0.28 * s);
+        hood.add(eye);
+      }
+      rootGroup.add(hood);
+
+      // Left Claw + Full 3D Frost-Reaper Great-Scythe in Right Hand!
+      leftArm.position.set(-0.62 * s, 1.62 * s, 0.1 * s);
+      const lClaw = new THREE.Mesh(new THREE.ConeGeometry(0.14 * s, 0.72 * s, 4), accentMat);
+      lClaw.rotation.x = Math.PI * 0.72;
+      lClaw.position.set(0, -0.28 * s, 0.22 * s);
+      leftArm.add(lClaw);
+
+      rightArm.position.set(0.62 * s, 1.62 * s, 0.1 * s);
+      const rClaw = new THREE.Mesh(new THREE.ConeGeometry(0.14 * s, 0.58 * s, 4), bodyMat);
+      rClaw.rotation.x = Math.PI * 0.65;
+      rClaw.position.set(0, -0.22 * s, 0.18 * s);
+      const scythePole = new THREE.Mesh(new THREE.BoxGeometry(0.07 * s, 0.07 * s, 1.75 * s), darkMat);
+      scythePole.position.set(0, -0.35 * s, 0.55 * s);
+      scythePole.rotation.x = 0.35;
+      const scytheCrescent = new THREE.Mesh(new THREE.ConeGeometry(0.16 * s, 0.92 * s, 4), accentMat);
+      scytheCrescent.position.set(-0.32 * s, -0.62 * s, 1.25 * s);
+      scytheCrescent.rotation.z = Math.PI * 0.52;
+      rightArm.add(rClaw, scythePole, scytheCrescent);
+
+      rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
+    } else if (def.modelType === 'sentinel') {
+      // =====================================================
+      // 6. CELESTIAL STAR-SENTINEL: Seraphic Ophanim Construct
+      // =====================================================
+      const diamondCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.46 * s, 0), bodyMat);
+      diamondCore.scale.set(0.9, 1.45, 0.9);
+      diamondCore.position.set(0, 1.42 * s, 0);
+      const eyeIris = new THREE.Mesh(new THREE.OctahedronGeometry(0.22 * s, 0), eyeMat);
+      eyeIris.position.set(0, 1.42 * s, 0.36 * s);
+      const crownStar = new THREE.Mesh(new THREE.OctahedronGeometry(0.18 * s, 0), accentMat);
+      crownStar.position.set(0, 2.25 * s, 0);
+      rootGroup.add(diamondCore, eyeIris, crownStar);
+
+      // Counter-Rotating Golden Gyroscope Rings
+      const ringOuter = new THREE.Mesh(new THREE.TorusGeometry(0.82 * s, 0.055 * s, 6, 24), accentMat);
+      ringOuter.position.set(0, 1.42 * s, 0);
+      const ringInner = new THREE.Mesh(new THREE.TorusGeometry(0.62 * s, 0.045 * s, 6, 20), eyeMat);
+      ringInner.position.set(0, 1.42 * s, 0);
+      extraAnimObj = ringOuter;
+      secondaryAnimObj = ringInner;
+      rootGroup.add(ringOuter, ringInner);
+
+      // 4 Articulated Hovering Starlight Wing-Blades (2 per side)
+      leftArm.position.set(-0.88 * s, 1.45 * s, 0);
+      rightArm.position.set(0.88 * s, 1.45 * s, 0);
+      for (const { grp, side } of [
         { grp: leftArm, side: -1 },
         { grp: rightArm, side: 1 },
-      ].forEach(({ grp, side }) => {
-        for (let pair = 0; pair < 2; pair++) {
-          const zOff = (pair - 0.5) * 0.28 * s;
-          const femur = new THREE.Mesh(new THREE.BoxGeometry(0.42 * s, 0.12 * s, 0.12 * s), accentMat);
-          femur.position.set(side * 0.2 * s, 0.08 * s, zOff);
-          femur.rotation.z = side * 0.45;
-          const tibia = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 0.52 * s, 0.12 * s), bodyMat);
-          tibia.position.set(side * 0.42 * s, -0.22 * s, zOff);
-          tibia.rotation.z = -side * 0.2;
-          grp.add(femur, tibia);
+      ]) {
+        const upperWing = new THREE.Mesh(new THREE.BoxGeometry(0.75 * s, 0.16 * s, 0.08 * s), accentMat);
+        upperWing.position.set(side * 0.25 * s, 0.32 * s, -0.1 * s);
+        upperWing.rotation.z = side * 0.38;
+        const lowerWing = new THREE.Mesh(new THREE.BoxGeometry(0.65 * s, 0.14 * s, 0.08 * s), eyeMat);
+        lowerWing.position.set(side * 0.22 * s, -0.28 * s, -0.1 * s);
+        lowerWing.rotation.z = -side * 0.32;
+        grp.add(upperWing, lowerWing);
+      }
+      rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
+    } else if (def.modelType === 'brute') {
+      // =====================================================
+      // 7. PYROCLAST MAGMA BRUTE: 4-Horned Volcanic Demon Juggernaut
+      // =====================================================
+      const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.82 * s, 0.34 * s, 0.56 * s), darkMat);
+      pelvis.position.set(0, 0.78 * s, 0);
+      const magmaChest = new THREE.Mesh(new THREE.BoxGeometry(1.12 * s, 0.98 * s, 0.68 * s), bodyMat);
+      magmaChest.position.set(0, 1.38 * s, 0.05 * s);
+      magmaChest.rotation.x = 0.12;
+      // Glowing Molten Cracks across Chest + Spinning Magma Furnace Core
+      const furnaceCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.28 * s, 0), eyeMat);
+      furnaceCore.position.set(0, 1.42 * s, 0.36 * s);
+      extraAnimObj = furnaceCore;
+      // Twin Volcanic Back Vents
+      for (const side of [-1, 1]) {
+        const vent = new THREE.Mesh(new THREE.ConeGeometry(0.22 * s, 0.65 * s, 5), bodyMat);
+        vent.position.set(side * 0.34 * s, 1.88 * s, -0.34 * s);
+        vent.rotation.x = -0.45;
+        const ventRim = new THREE.Mesh(new THREE.TorusGeometry(0.12 * s, 0.04 * s, 5, 10), eyeMat);
+        ventRim.position.set(side * 0.34 * s, 2.12 * s, -0.46 * s);
+        ventRim.rotation.x = Math.PI / 2 - 0.45;
+        rootGroup.add(vent, ventRim);
+      }
+      rootGroup.add(pelvis, magmaChest, furnaceCore);
+
+      // Demon Bull Skull + 4 Curved Molten Horns + Glowing Furnace Jaw
+      const demonHead = new THREE.Mesh(new THREE.BoxGeometry(0.62 * s, 0.56 * s, 0.62 * s), bodyMat);
+      demonHead.position.set(0, 2.08 * s, 0.18 * s);
+      const jawGrate = new THREE.Mesh(new THREE.BoxGeometry(0.48 * s, 0.16 * s, 0.14 * s), accentMat);
+      jawGrate.position.set(0, -0.18 * s, 0.3 * s);
+      demonHead.add(jawGrate);
+      for (const side of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.16 * s, 0.1 * s, 0.08 * s), eyeMat);
+        eye.position.set(side * 0.16 * s, 0.06 * s, 0.32 * s);
+        eye.rotation.z = -side * 0.2;
+        const upperHorn = new THREE.Mesh(new THREE.ConeGeometry(0.12 * s, 0.62 * s, 4), accentMat);
+        upperHorn.position.set(side * 0.42 * s, 0.34 * s, 0.05 * s);
+        upperHorn.rotation.z = -side * 0.55;
+        upperHorn.rotation.x = 0.35;
+        const lowerHorn = new THREE.Mesh(new THREE.ConeGeometry(0.08 * s, 0.38 * s, 4), eyeMat);
+        lowerHorn.position.set(side * 0.36 * s, 0.02 * s, 0.22 * s);
+        lowerHorn.rotation.x = 0.85;
+        demonHead.add(eye, upperHorn, lowerHorn);
+      }
+      rootGroup.add(demonHead);
+
+      // Armored Obsidian Hoof-Legs
+      leftLeg.position.set(-0.32 * s, 0.7 * s, 0);
+      rightLeg.position.set(0.32 * s, 0.7 * s, 0);
+      for (const leg of [leftLeg, rightLeg]) {
+        const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.34 * s, 0.68 * s, 0.36 * s), bodyMat);
+        thigh.position.y = -0.34 * s;
+        const greave = new THREE.Mesh(new THREE.BoxGeometry(0.38 * s, 0.24 * s, 0.42 * s), accentMat);
+        greave.position.set(0, -0.58 * s, 0.04 * s);
+        leg.add(thigh, greave);
+      }
+
+      // Spiked Pauldrons + Molten Shield (Left) & Two-Headed Solar Warhammer (Right)!
+      leftArm.position.set(-0.76 * s, 1.72 * s, 0.06 * s);
+      rightArm.position.set(0.76 * s, 1.72 * s, 0.06 * s);
+      [leftArm, rightArm].forEach((arm, idx) => {
+        const pauldron = new THREE.Mesh(new THREE.BoxGeometry(0.44 * s, 0.34 * s, 0.44 * s), darkMat);
+        const pSpike = new THREE.Mesh(new THREE.ConeGeometry(0.11 * s, 0.38 * s, 4), accentMat);
+        pSpike.position.set(idx === 0 ? -0.15 * s : 0.15 * s, 0.3 * s, 0);
+        pSpike.rotation.z = idx === 0 ? 0.4 : -0.4;
+        const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.34 * s, 0.82 * s, 0.34 * s), bodyMat);
+        forearm.position.y = -0.4 * s;
+        arm.add(pauldron, pSpike, forearm);
+
+        if (idx === 0) {
+          // Spiked Volcanic Buckler Shield
+          const shield = new THREE.Mesh(new THREE.OctahedronGeometry(0.42 * s, 0), darkMat);
+          shield.scale.set(0.35, 1.15, 1.15);
+          shield.position.set(-0.22 * s, -0.55 * s, 0.2 * s);
+          const bossGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.16 * s, 0), eyeMat);
+          bossGem.position.set(-0.32 * s, -0.55 * s, 0.2 * s);
+          arm.add(shield, bossGem);
+        } else {
+          // Colossal Two-Headed Solar Warhammer
+          const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.1 * s, 0.1 * s, 1.25 * s), darkMat);
+          shaft.position.set(0, -0.72 * s, 0.45 * s);
+          const hammerHead = new THREE.Mesh(new THREE.BoxGeometry(0.56 * s, 0.36 * s, 0.38 * s), accentMat);
+          hammerHead.position.set(0, -0.72 * s, 0.96 * s);
+          arm.add(shaft, hammerHead);
         }
       });
       rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
-    } else if (def.modelType === 'wraith' || def.modelType === 'sentinel') {
-      // Floating Wraith / Celestial Star-Sentinel
-      if (def.modelType === 'sentinel') {
-        const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.45 * s, 0), bodyMat);
-        core.position.set(0, 1.35 * s, 0);
-        const eyeLens = new THREE.Mesh(new THREE.OctahedronGeometry(0.22 * s, 0), eyeMat);
-        eyeLens.position.set(0, 1.35 * s, 0.34 * s);
-        const halo = new THREE.Mesh(new THREE.TorusGeometry(0.65 * s, 0.06 * s, 6, 20), accentMat);
-        halo.position.set(0, 1.35 * s, 0);
-        rootGroup.add(core, eyeLens, halo);
-
-        // Floating Wing Shields
-        leftArm.position.set(-0.75 * s, 1.45 * s, 0);
-        rightArm.position.set(0.75 * s, 1.45 * s, 0);
-        const wingL = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.95 * s, 0.42 * s), accentMat);
-        const wingR = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.95 * s, 0.42 * s), accentMat);
-        leftArm.add(wingL);
-        rightArm.add(wingR);
-        rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
-      } else {
-        // Permafrost Wraith: Hooded cloak + glowing ribcage core + trailing ice ribbons
-        const cloak = new THREE.Mesh(new THREE.ConeGeometry(0.55 * s, 1.35 * s, 6), bodyMat);
-        cloak.position.set(0, 1.15 * s, 0);
-        const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.28 * s, 0), accentMat);
-        core.position.set(0, 1.2 * s, 0.15 * s);
-        const hood = new THREE.Mesh(new THREE.BoxGeometry(0.56 * s, 0.56 * s, 0.56 * s), bodyMat);
-        hood.position.set(0, 1.85 * s, 0.05 * s);
-        const crown = new THREE.Mesh(new THREE.ConeGeometry(0.32 * s, 0.4 * s, 4), accentMat);
-        crown.position.set(0, 0.42 * s, 0);
-        const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.09 * s, 0.06 * s), eyeMat);
-        eyeL.position.set(-0.13 * s, 0.02 * s, 0.29 * s);
-        const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.09 * s, 0.06 * s), eyeMat);
-        eyeR.position.set(0.13 * s, 0.02 * s, 0.29 * s);
-        hood.add(crown, eyeL, eyeR);
-
-        leftArm.position.set(-0.56 * s, 1.55 * s, 0.1 * s);
-        rightArm.position.set(0.56 * s, 1.55 * s, 0.1 * s);
-        const clawL = new THREE.Mesh(new THREE.ConeGeometry(0.15 * s, 0.65 * s, 4), accentMat);
-        clawL.rotation.x = Math.PI;
-        clawL.position.y = -0.3 * s;
-        const clawR = new THREE.Mesh(new THREE.ConeGeometry(0.15 * s, 0.65 * s, 4), accentMat);
-        clawR.rotation.x = Math.PI;
-        clawR.position.y = -0.3 * s;
-        leftArm.add(clawL);
-        rightArm.add(clawR);
-
-        rootGroup.add(cloak, core, hood, leftLeg, rightLeg, leftArm, rightArm);
-      }
     } else {
-      // Bipedal Monsters: Sylvan Stalker, Moss Golem, Magma Brute, Void Reaver
-      const isHeavy = def.modelType === 'golem' || def.modelType === 'brute';
-      const chestW = isHeavy ? 0.98 * s : 0.68 * s;
-      const chestH = isHeavy ? 0.92 * s : 0.78 * s;
-      const chestD = isHeavy ? 0.58 * s : 0.42 * s;
+      // =====================================================
+      // 8. ABYSSAL VOID REAVER: Four-Armed Shadow-Rift Assassin
+      // =====================================================
+      const waist = new THREE.Mesh(new THREE.ConeGeometry(0.34 * s, 0.55 * s, 5), darkMat);
+      waist.position.set(0, 0.88 * s, 0);
+      waist.rotation.x = Math.PI;
+      const sleekTorso = new THREE.Mesh(new THREE.BoxGeometry(0.72 * s, 0.82 * s, 0.44 * s), bodyMat);
+      sleekTorso.position.set(0, 1.42 * s, 0);
+      const voidRib = new THREE.Mesh(new THREE.OctahedronGeometry(0.26 * s, 0), accentMat);
+      voidRib.position.set(0, 1.46 * s, 0.22 * s);
+      // Spinning Dimensional Rift Halo behind shoulders!
+      const riftHalo = new THREE.Mesh(new THREE.TorusGeometry(0.68 * s, 0.045 * s, 6, 18), accentMat);
+      riftHalo.position.set(0, 1.65 * s, -0.28 * s);
+      extraAnimObj = riftHalo;
+      rootGroup.add(waist, sleekTorso, voidRib, riftHalo);
 
-      // Pelvis + Chest + Glowing Core/Runes
-      const pelvis = new THREE.Mesh(new THREE.BoxGeometry(chestW * 0.78, 0.32 * s, chestD * 0.85), darkMat);
-      pelvis.position.set(0, 0.78 * s, 0);
-      const chest = new THREE.Mesh(new THREE.BoxGeometry(chestW, chestH, chestD), bodyMat);
-      chest.position.set(0, 1.32 * s, 0);
-      const chestPlate = new THREE.Mesh(new THREE.BoxGeometry(chestW * 0.65, chestH * 0.55, chestD + 0.06 * s), accentMat);
-      chestPlate.position.set(0, 1.36 * s, 0);
-      rootGroup.add(pelvis, chest, chestPlate);
-
-      // Head + Helmet/Horns/Eyes
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.56 * s, 0.56 * s, 0.56 * s), bodyMat);
-      head.position.set(0, 2.02 * s, 0);
-      const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.1 * s, 0.06 * s), eyeMat);
-      eyeL.position.set(-0.14 * s, 0.05 * s, 0.29 * s);
-      const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.1 * s, 0.06 * s), eyeMat);
-      eyeR.position.set(0.14 * s, 0.05 * s, 0.29 * s);
-      head.add(eyeL, eyeR);
-
-      if (def.modelType === 'brute' || def.modelType === 'reaver') {
-        const hornL = new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, 0.45 * s, 4), accentMat);
-        hornL.position.set(-0.32 * s, 0.34 * s, 0);
-        hornL.rotation.z = 0.45;
-        const hornR = new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, 0.45 * s, 4), accentMat);
-        hornR.position.set(0.32 * s, 0.34 * s, 0);
-        hornR.rotation.z = -0.45;
-        head.add(hornL, hornR);
-      } else {
-        const crest = new THREE.Mesh(new THREE.BoxGeometry(0.66 * s, 0.24 * s, 0.36 * s), accentMat);
-        crest.position.set(0, 0.34 * s, 0);
-        head.add(crest);
+      // Angular Void-Knight Helm + Glowing V-Visor + Swept-Back Rift Horns
+      const helm = new THREE.Mesh(new THREE.OctahedronGeometry(0.38 * s, 0), bodyMat);
+      helm.scale.set(0.95, 1.1, 1.05);
+      helm.position.set(0, 2.06 * s, 0.04 * s);
+      for (const side of [-1, 1]) {
+        const visor = new THREE.Mesh(new THREE.BoxGeometry(0.18 * s, 0.07 * s, 0.08 * s), eyeMat);
+        visor.position.set(side * 0.13 * s, 0.04 * s, 0.3 * s);
+        visor.rotation.z = -side * 0.32;
+        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.09 * s, 0.68 * s, 4), accentMat);
+        horn.position.set(side * 0.28 * s, 0.34 * s, -0.18 * s);
+        horn.rotation.x = -0.65;
+        horn.rotation.z = -side * 0.35;
+        helm.add(visor, horn);
       }
-      rootGroup.add(head);
+      rootGroup.add(helm);
 
-      // Articulated Legs
-      leftLeg.position.set(-chestW * 0.28, 0.68 * s, 0);
-      rightLeg.position.set(chestW * 0.28, 0.68 * s, 0);
-      [leftLeg, rightLeg].forEach((leg) => {
-        const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.28 * s, 0.68 * s, 0.28 * s), bodyMat);
-        thigh.position.y = -0.34 * s;
-        const boot = new THREE.Mesh(new THREE.BoxGeometry(0.31 * s, 0.22 * s, 0.34 * s), accentMat);
-        boot.position.set(0, -0.58 * s, 0.04 * s);
-        leg.add(thigh, boot);
-      });
+      // Sleek Bladed Greaves
+      leftLeg.position.set(-0.22 * s, 0.72 * s, 0);
+      rightLeg.position.set(0.22 * s, 0.72 * s, 0);
+      for (const leg of [leftLeg, rightLeg]) {
+        const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.22 * s, 0.72 * s, 0.24 * s), bodyMat);
+        thigh.position.y = -0.36 * s;
+        const kneeFin = new THREE.Mesh(new THREE.ConeGeometry(0.08 * s, 0.28 * s, 4), accentMat);
+        kneeFin.position.set(0, -0.32 * s, 0.16 * s);
+        kneeFin.rotation.x = 0.5;
+        leg.add(thigh, kneeFin);
+      }
 
-      // Articulated Arms + Pauldrons + Held Monster Weapons!
-      leftArm.position.set(-(chestW * 0.5 + 0.18 * s), 1.66 * s, 0);
-      rightArm.position.set(chestW * 0.5 + 0.18 * s, 1.66 * s, 0);
-      [leftArm, rightArm].forEach((arm, idx) => {
-        const pauldron = new THREE.Mesh(new THREE.BoxGeometry(0.36 * s, 0.28 * s, 0.36 * s), accentMat);
-        pauldron.position.y = 0.05 * s;
-        const forearm = new THREE.Mesh(
-          new THREE.BoxGeometry((isHeavy ? 0.32 : 0.22) * s, 0.78 * s, (isHeavy ? 0.32 : 0.22) * s),
-          bodyMat
-        );
-        forearm.position.y = -0.38 * s;
-        arm.add(pauldron, forearm);
+      // FOUR Articulated Arms wielding Quadruple Glowing Plasma-Violet Katanas!
+      leftArm.position.set(-0.52 * s, 1.72 * s, 0);
+      rightArm.position.set(0.52 * s, 1.72 * s, 0);
+      for (const { grp, side } of [
+        { grp: leftArm, side: -1 },
+        { grp: rightArm, side: 1 },
+      ]) {
+        // Upper Arm + Katana 1
+        const pauldron = new THREE.Mesh(new THREE.ConeGeometry(0.24 * s, 0.45 * s, 4), accentMat);
+        pauldron.rotation.z = -side * 0.65;
+        pauldron.position.set(side * 0.1 * s, 0.08 * s, 0);
+        const upperLimb = new THREE.Mesh(new THREE.BoxGeometry(0.18 * s, 0.68 * s, 0.18 * s), bodyMat);
+        upperLimb.position.set(side * 0.06 * s, -0.32 * s, 0.05 * s);
+        const blade1 = new THREE.Mesh(new THREE.BoxGeometry(0.05 * s, 0.1 * s, 1.05 * s), eyeMat);
+        blade1.position.set(side * 0.06 * s, -0.62 * s, 0.52 * s);
 
-        // Give Void Reavers dual glowing blades & Magma Brutes a volcanic club!
-        if (def.modelType === 'reaver') {
-          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06 * s, 0.12 * s, 0.85 * s), accentMat);
-          blade.position.set(0, -0.72 * s, 0.38 * s);
-          arm.add(blade);
-        } else if (def.modelType === 'brute' && idx === 1) {
-          const club = new THREE.Mesh(new THREE.BoxGeometry(0.24 * s, 0.24 * s, 0.9 * s), accentMat);
-          club.position.set(0, -0.72 * s, 0.35 * s);
-          arm.add(club);
-        }
-      });
+        // Lower Secondary Arm + Katana 2!
+        const lowerLimb = new THREE.Mesh(new THREE.BoxGeometry(0.15 * s, 0.58 * s, 0.15 * s), darkMat);
+        lowerLimb.position.set(side * 0.24 * s, -0.45 * s, -0.05 * s);
+        lowerLimb.rotation.z = -side * 0.35;
+        const blade2 = new THREE.Mesh(new THREE.BoxGeometry(0.05 * s, 0.09 * s, 0.92 * s), accentMat);
+        blade2.position.set(side * 0.36 * s, -0.72 * s, 0.42 * s);
 
+        grp.add(pauldron, upperLimb, blade1, lowerLimb, blade2);
+      }
       rootGroup.add(leftLeg, rightLeg, leftArm, rightArm);
     }
 
     // Floating 3D Health Bar above monster
     const hpGroup = new THREE.Group();
-    hpGroup.position.set(0, 2.55 * s, 0);
+    hpGroup.position.set(0, 2.65 * s, 0);
     const bgBar = new THREE.Mesh(
       new THREE.PlaneGeometry(1.1, 0.13),
       new THREE.MeshBasicMaterial({ color: '#1e293b', side: THREE.DoubleSide })
@@ -2641,7 +3030,7 @@ export class EntityManager {
     hpGroup.add(bgBar, hpBarFill);
     rootGroup.add(hpGroup);
 
-    return { rootGroup, leftLeg, rightLeg, leftArm, rightArm, hpBarFill };
+    return { rootGroup, leftLeg, rightLeg, leftArm, rightArm, extraAnimObj, secondaryAnimObj, hpBarFill };
   }
 
   private buildBossModel(def: BossDef): {
