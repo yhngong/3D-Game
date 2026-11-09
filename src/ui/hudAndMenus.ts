@@ -435,7 +435,7 @@ export class HudAndMenuManager {
     targetBlockId: BlockId | null,
     breakProgress: number,
     isNightTime = false,
-    timeOfDay = 0.25
+    secondsUntilChange = 180
   ): void {
     // Level & XP Bar
     this.levelBadgeEl.textContent = `LVL ${this.player.level}`;
@@ -473,16 +473,16 @@ export class HudAndMenuManager {
       this.dashBadgeEl.className = 'hud-badge';
     }
 
-    // Format 24-hour clock from timeOfDay
-    const totalHours = Math.floor((timeOfDay * 24 + 6) % 24);
-    const displayHour = totalHours % 12 === 0 ? 12 : totalHours % 12;
-    const amPm = totalHours >= 12 ? 'PM' : 'AM';
+    // Countdown timer until Night / Day
+    const mins = Math.floor(secondsUntilChange / 60);
+    const secs = Math.floor(secondsUntilChange % 60);
+    const timerStr = mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`;
     if (isNightTime) {
-      this.daylightBadgeEl.textContent = `🌙 ${displayHour}:00 ${amPm} (Night)`;
+      this.daylightBadgeEl.textContent = `🌙 Night — Day in ${timerStr}`;
       this.daylightBadgeEl.style.borderColor = '#c084fc';
       this.daylightBadgeEl.style.color = '#e9d5ff';
     } else {
-      this.daylightBadgeEl.textContent = `☀️ ${displayHour}:00 ${amPm} (Day)`;
+      this.daylightBadgeEl.textContent = `☀️ Day — Night in ${timerStr}`;
       this.daylightBadgeEl.style.borderColor = '#fde047';
       this.daylightBadgeEl.style.color = '#fef08a';
     }

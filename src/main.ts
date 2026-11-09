@@ -34,7 +34,9 @@ class AethelgardGame {
   private miningVoxelKey = '';
   private miningProgress = 0;
   private hitSoundCooldown = 0;
-  private timeOfDay = 0.22; // 0..0.5 = Day, 0.5..1.0 = Night
+  private timeOfDay = 0.08; // 0..0.5 = Day (180s), 0.5..1.0 = Night (60s)
+  private readonly dayDurationSec = 180;
+  private readonly nightDurationSec = 60;
   private wasNightTime = false;
 
   constructor() {
@@ -257,9 +259,9 @@ class AethelgardGame {
       }
       if (e.code === 'KeyT') {
         if (this.player.cheatsEnabled) {
-          // Toggle between Midday (0.22) and Midnight (0.72) when cheats are active
-          const isNight = Math.sin(this.timeOfDay * Math.PI * 2) < 0;
-          this.timeOfDay = isNight ? 0.22 : 0.72;
+          // Toggle between Day and Night when cheats are active
+          const isNight = this.timeOfDay >= 0.5;
+          this.timeOfDay = isNight ? 0.05 : 0.52;
         } else {
           this.ui.showBanner(
             '🔒 CHEATS DISABLED',
@@ -490,13 +492,19 @@ class AethelgardGame {
     return { targetBlockId: hit.blockId, progress: this.miningProgress };
   }
 
-  private updateAtmosphere(dt: number): boolean {
-    // Full Day-Night cycle every ~140 seconds (70s Day, 70s Night)
-    this.timeOfDay = (this.timeOfDay + dt * 0.007) % 1.0;
+  private updateAtmosphere(dt: number): { isNightTime: boolean; secondsRemaining: number } {
+    // Longer Days (180s) & Short Nights (60s)
+    const currentlyNight = this.timeOfDay >= 0.5;
+    const rate = currentlyNight ? 0.5 / this.nightDurationSec : 0.5 / this.dayDurationSec;
+    this.timeOfDay = (this.timeOfDay + dt * rate) % 1.0;
+
     const sunAngle = this.timeOfDay * Math.PI * 2;
     const sunHeight = Math.sin(sunAngle);
     const sunHoriz = Math.cos(sunAngle);
-    const isNightTime = sunHeight < 0;
+    const isNightTime = this.timeOfDay >= 0.5;
+    const secondsRemaining = isNightTime
+      ? Math.max(1, Math.ceil(((1.0 - this.timeOfDay) / 0.5) * this.nightDurationSec))
+      : Math.max(1, Math.ceil(((0.5 - this.timeOfDay) / 0.5) * this.dayDurationSec));
 
     if (isNightTime !== this.wasNightTime) {
       this.wasNightTime = isNightTime;
@@ -568,7 +576,7 @@ class AethelgardGame {
 
     (this.scene.background as THREE.Color).lerp(skyColor, Math.min(1, dt * 2.5));
     (this.scene.fog as THREE.FogExp2).color.copy(this.scene.background as THREE.Color);
-    return isNightTime;
+    return { isNightTime, secondsRemaining };
   }
 
   private animate(): void {
@@ -582,10 +590,10 @@ class AethelgardGame {
       if (!this.ui.isMenuOpen) {
         this.player.update(dt);
         this.world.updateChunksAroundPlayer(this.player.position.x, this.player.position.z, 3);
-        const isNightTime = this.updateAtmosphere(dt);
+        const { isNightTime, secondsRemaining } = this.updateAtmosphere(dt);
         this.entities.update(dt, isNightTime);
         const miningState = this.updateMiningAndTargeting(dt);
-        this.ui.updateHud(miningState.targetBlockId, miningState.progress, isNightTime, this.timeOfDay);
+        this.ui.updateHud(miningState.targetBlockId, miningState.progress, isNightTime, secondsRemaining);
       }
 
       this.renderer.render(this.scene, this.camera);
