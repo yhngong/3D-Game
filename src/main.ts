@@ -235,7 +235,7 @@ class AethelgardGame {
           const frontPos = this.player.position.clone().add(new THREE.Vector3(0, 1.2, 0));
           this.entities.spawnParticles(frontPos, '#c084fc', 16, 4.5);
           this.ui.showBanner(
-            '♻️ ITEM DISPOSED (VOID INCINERATOR)',
+            '🗑️ ITEM DISPOSED',
             `Salvaged ${disposed.count}x ${disposed.itemName} into +${disposed.xpGained} Hero XP!`,
             '#c084fc'
           );
@@ -502,7 +502,7 @@ class AethelgardGame {
       this.wasNightTime = isNightTime;
       if (isNightTime) {
         this.ui.showBanner(
-          '🌙 NIGHT FALLS OVER AETHELGARD',
+          '🌙 NIGHT FALLS',
           'Hostile Monsters are now spawning in the darkness!',
           '#c084fc'
         );

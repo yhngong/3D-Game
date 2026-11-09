@@ -569,22 +569,25 @@ export class EntityManager {
       case 'spore_barrage':
       case 'icicle_fan':
       case 'magma_volley':
+      case 'void_lance_barrage':
       case 'starlight_lance': {
-        const count = attack === 'starlight_lance' ? 7 : 5;
-        const spread = 0.18;
+        const isFinal2 = attack === 'void_lance_barrage' || attack === 'starlight_lance';
+        const count = attack === 'starlight_lance' ? 9 : attack === 'void_lance_barrage' ? 7 : 5;
+        const spread = isFinal2 ? 0.14 : 0.18;
+        const projSpeed = attack === 'starlight_lance' ? 27 : attack === 'void_lance_barrage' ? 24 : 18;
         for (let i = 0; i < count; i++) {
           const offsetAngle = (i - (count - 1) / 2) * spread;
           const dir = toPlayer.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), offsetAngle);
           this.spawnProjectile({
             position: center.clone(),
-            velocity: dir.multiplyScalar(18),
+            velocity: dir.multiplyScalar(projSpeed),
             fromPlayer: false,
             damage: b.def.damage,
-            radius: 0.35,
+            radius: isFinal2 ? 0.44 : 0.35,
             color: b.def.glowColor,
             maxLife: 3.5,
             gravity: attack === 'magma_volley' ? 3.5 : 0,
-            explosiveRadius: attack === 'magma_volley' ? 3.0 : undefined,
+            explosiveRadius: attack === 'magma_volley' ? 3.0 : attack === 'starlight_lance' ? 2.6 : undefined,
           });
         }
         sound.playMagicCast(0.7);
@@ -595,12 +598,42 @@ export class EntityManager {
       case 'frost_nova':
       case 'lava_shockwave':
       case 'cosmic_nova': {
-        const radius = 9.5;
+        const radius = attack === 'cosmic_nova' ? 13.0 : 9.5;
         this.spawnShockwave(b.position, radius, b.def.accentColor);
         sound.playExplosion();
         if (this.player.position.distanceTo(b.position) <= radius) {
           this.player.takeDamage(b.def.damage);
-          this.player.velocity.y = 7.5;
+          this.player.velocity.y = 8.5;
+        }
+        break;
+      }
+
+      case 'gravity_crush': {
+        // Pulls player violently toward the boss and detonates an abyssal shockwave + ring of orbs!
+        const radius = 16.0;
+        this.spawnShockwave(b.position, radius, b.def.glowColor);
+        this.spawnParticles(center, b.def.accentColor, 32, 8);
+        sound.playExplosion();
+        const pullDir = b.position.clone().sub(this.player.position).normalize();
+        this.player.velocity.x += pullDir.x * 18;
+        this.player.velocity.z += pullDir.z * 18;
+        this.player.velocity.y = 6.5;
+        if (this.player.position.distanceTo(b.position) <= 12.0) {
+          this.player.takeDamage(Math.round(b.def.damage * 1.15));
+        }
+        for (let i = 0; i < 12; i++) {
+          const angle = (i / 12) * Math.PI * 2;
+          const dir = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).normalize();
+          this.spawnProjectile({
+            position: center.clone(),
+            velocity: dir.multiplyScalar(21),
+            fromPlayer: false,
+            damage: b.def.damage,
+            radius: 0.42,
+            color: b.def.accentColor,
+            maxLife: 3.2,
+            gravity: 0,
+          });
         }
         break;
       }
@@ -616,44 +649,92 @@ export class EntityManager {
         break;
       }
 
+      case 'summon_void_reavers': {
+        const reaverDef = MONSTERS.find((m) => m.id === 'void_reaver') || MONSTERS[0];
+        if (this.monsters.length < 12) {
+          for (const side of [-1, 1]) {
+            this.spawnMonster(
+              reaverDef,
+              b.position.clone().add(new THREE.Vector3(side * 4, 1.5, 3))
+            );
+          }
+        }
+        sound.playMagicCast(0.5);
+        break;
+      }
+
+      case 'summon_sentinels': {
+        const sentinelDef = MONSTERS.find((m) => m.id === 'astral_sentinel') || MONSTERS[0];
+        if (this.monsters.length < 14) {
+          for (const side of [-1, 1]) {
+            this.spawnMonster(
+              sentinelDef,
+              b.position.clone().add(new THREE.Vector3(side * 5, 2.5, -2))
+            );
+          }
+        }
+        sound.playMagicCast(1.3);
+        break;
+      }
+
       case 'blizzard_spiral':
       case 'void_spiral':
       case 'singularity_burst':
       case 'supernova_cataclysm': {
-        const bolts = attack === 'supernova_cataclysm' ? 14 : 10;
+        const isSuper = attack === 'supernova_cataclysm' || attack === 'singularity_burst';
+        const bolts = attack === 'supernova_cataclysm' ? 18 : attack === 'singularity_burst' ? 14 : 10;
+        const speed = isSuper ? 22 : 15;
         for (let i = 0; i < bolts; i++) {
           const angle = (i / bolts) * Math.PI * 2 + performance.now() * 0.002;
-          const dir = new THREE.Vector3(Math.cos(angle), -0.05, Math.sin(angle)).normalize();
+          const dir = new THREE.Vector3(Math.cos(angle), -0.04, Math.sin(angle)).normalize();
           this.spawnProjectile({
             position: center.clone(),
-            velocity: dir.multiplyScalar(15),
+            velocity: dir.multiplyScalar(speed),
             fromPlayer: false,
             damage: b.def.damage,
-            radius: 0.38,
+            radius: isSuper ? 0.45 : 0.38,
             color: b.def.glowColor,
             maxLife: 3.5,
             gravity: 0,
           });
+        }
+        // Extra aimed burst directly at player for the last 2 bosses!
+        if (isSuper) {
+          for (let j = -1; j <= 1; j++) {
+            const aimed = toPlayer.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), j * 0.12);
+            this.spawnProjectile({
+              position: center.clone(),
+              velocity: aimed.multiplyScalar(26),
+              fromPlayer: false,
+              damage: Math.round(b.def.damage * 1.1),
+              radius: 0.48,
+              color: b.def.accentColor,
+              maxLife: 3.2,
+              gravity: 0,
+              explosiveRadius: 3.2,
+            });
+          }
         }
         sound.playMagicCast(1.2);
         break;
       }
 
       case 'meteor_rain': {
-        for (let i = 0; i < 4; i++) {
+        const count = b.def.tier >= 5 ? 7 : 4;
+        for (let i = 0; i < count; i++) {
           const skyPos = this.player.position
             .clone()
-            .add(new THREE.Vector3((Math.random() - 0.5) * 12, 16 + i * 2, (Math.random() - 0.5) * 12));
+            .add(new THREE.Vector3((Math.random() - 0.5) * 11, 15 + i * 1.6, (Math.random() - 0.5) * 11));
           this.spawnProjectile({
             position: skyPos,
-            velocity: new THREE.Vector3(0, -18, 0),
+            velocity: new THREE.Vector3(0, -22, 0),
             fromPlayer: false,
             damage: b.def.damage,
-            radius: 0.55,
+            radius: 0.6,
             color: b.def.accentColor,
             maxLife: 2.5,
-            gravity: 4.0,
-            explosiveRadius: 3.8,
+            gravity: 5.0,
+            explosiveRadius: 4.2,
           });
         }
         sound.playExplosion();
@@ -661,12 +742,34 @@ export class EntityManager {
       }
 
       case 'rift_teleport': {
-        this.spawnParticles(center, b.def.glowColor, 20, 5);
+        this.spawnParticles(center, b.def.glowColor, 24, 6);
         const angle = Math.random() * Math.PI * 2;
-        b.position.x = this.player.position.x + Math.cos(angle) * 9;
-        b.position.z = this.player.position.z + Math.sin(angle) * 9;
+        const dist = b.def.tier >= 5 ? 6.5 : 9;
+        b.position.x = this.player.position.x + Math.cos(angle) * dist;
+        b.position.z = this.player.position.z + Math.sin(angle) * dist;
         b.position.y = this.world.getSurfaceHeight(Math.floor(b.position.x), Math.floor(b.position.z)) + 2;
-        this.spawnParticles(b.position, b.def.glowColor, 20, 5);
+        this.spawnParticles(b.position, b.def.glowColor, 24, 6);
+        // Ambush slash right after teleporting for the last 2 bosses!
+        if (b.def.tier >= 5) {
+          const ambushDir = this.player.position
+            .clone()
+            .add(new THREE.Vector3(0, 1.0, 0))
+            .sub(b.position.clone().add(new THREE.Vector3(0, 2.0, 0)))
+            .normalize();
+          for (let k = -1; k <= 1; k++) {
+            const shotDir = ambushDir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), k * 0.16);
+            this.spawnProjectile({
+              position: b.position.clone().add(new THREE.Vector3(0, 2.0, 0)),
+              velocity: shotDir.multiplyScalar(25),
+              fromPlayer: false,
+              damage: b.def.damage,
+              radius: 0.42,
+              color: b.def.glowColor,
+              maxLife: 3.0,
+              gravity: 0,
+            });
+          }
+        }
         break;
       }
     }

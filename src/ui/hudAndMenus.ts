@@ -112,7 +112,7 @@ export class HudAndMenuManager {
       <!-- Top-Left Player Status -->
       <div class="hud-panel player-stats-panel">
         <div class="brand-header-row">
-          <div class="game-brand">AETHELGARD <span class="brand-sub">ASTRAL FORGE</span></div>
+          <div class="game-brand">funnyblockgame <span class="brand-sub">3D VOXEL RPG</span></div>
           <div class="level-pill-wrap">
             <span id="level-badge" class="level-badge">LVL 1</span>
             <span id="skill-alert-badge" class="skill-alert-badge" style="display:none;">+1 SP [K]</span>
@@ -202,12 +202,12 @@ export class HudAndMenuManager {
         </div>
       </div>
 
-      <!-- Fullscreen Modal Menu (Crafting, Inventory/Incinerator, Skills, Boss Codex, Controls) -->
+      <!-- Fullscreen Modal Menu (Crafting, Inventory/Trash, Skills, Boss Codex, Controls) -->
       <div id="modal-overlay" class="modal-overlay" style="display:none;">
         <div class="modal-window">
           <div class="modal-header">
             <div class="modal-tabs">
-              <button id="tab-btn-craft" class="modal-tab active">🔨 Forge, Bag & Incinerator [E]</button>
+              <button id="tab-btn-craft" class="modal-tab active">🔨 Forge & Inventory [E]</button>
               <button id="tab-btn-skills" class="modal-tab">🌟 Hero Skills & Achievements [K]</button>
               <button id="tab-btn-codex" class="modal-tab">📜 6-Tier & Boss Codex [P]</button>
               <button id="tab-btn-help" class="modal-tab">⚙️ Controls & World</button>
@@ -296,7 +296,7 @@ export class HudAndMenuManager {
 
     this.worldCreateOverlay.innerHTML = `
       <div class="world-create-card">
-        <div class="world-create-title">AETHELGARD: REALMS OF THE ASTRAL FORGE</div>
+        <div class="world-create-title">funnyblockgame</div>
         <div class="world-create-sub">3D Voxel Action-RPG • 6 Custom Tiers • 5 Multi-Phase Bosses • Hero Skill Tree</div>
 
         ${
@@ -322,7 +322,7 @@ export class HudAndMenuManager {
         <div class="world-form">
           <div class="world-field">
             <label>World Name</label>
-            <input id="new-world-name" type="text" value="New Aethelgard Realm" maxlength="32" class="world-input" />
+            <input id="new-world-name" type="text" value="funnyblockgame World" maxlength="32" class="world-input" />
           </div>
           <div class="world-field">
             <label>World Seed</label>
@@ -381,7 +381,7 @@ export class HudAndMenuManager {
     });
 
     document.getElementById('create-world-submit-btn')!.addEventListener('click', () => {
-      const nameVal = (document.getElementById('new-world-name') as HTMLInputElement).value || 'New Aethelgard Realm';
+      const nameVal = (document.getElementById('new-world-name') as HTMLInputElement).value || 'funnyblockgame World';
       const seedVal = Number((document.getElementById('new-world-seed') as HTMLInputElement).value) || 2026;
 
       this.player.createNewWorld(nameVal, seedVal, this.pendingWorldCheats);
@@ -772,8 +772,8 @@ export class HudAndMenuManager {
       }" data-inv-index="${i}" title="${
         itemDef
           ? `${itemDef.name} (x${slot!.count})\n${itemDef.description}\n\n• Left-Click: ${
-              this.isTrashMode ? '🔥 DISPOSE / INCINERATE FOR XP' : 'Equip or Swap with Hotbar'
-            }\n• Right-Click: 🔥 Dispose / Incinerate for +${itemDef.tier * 6 * slot!.count} XP`
+              this.isTrashMode ? '🗑️ DISPOSE ITEM FOR XP' : 'Equip or Swap with Hotbar'
+            }\n• Right-Click: 🗑️ Dispose Item for +${itemDef.tier * 6 * slot!.count} XP`
           : 'Empty Slot'
       }">
           ${isHotbar ? `<span class="inv-cell-num">${i + 1}</span>` : ''}
@@ -860,11 +860,11 @@ export class HudAndMenuManager {
             <span>⚡ Dash CD: <strong>${this.player.getDashCooldownDuration().toFixed(2)}s</strong></span>
           </div>
 
-          <!-- Void Incinerator / Item Disposal Controls -->
+          <!-- Item Trash & Disposal Controls -->
           <div class="incinerator-panel ${this.isTrashMode ? 'active' : ''}">
             <div class="incinerator-header">
               <div>
-                <div class="incinerator-title">🔥 Void Incinerator & Item Disposal</div>
+                <div class="incinerator-title">🗑️ Item Trash & Disposal</div>
                 <div class="incinerator-sub">
                   <strong>Right-click any slot</strong> (or toggle Trash Mode below) to dispose of unwanted items for <strong>Bonus XP & Mana</strong>! In-game hotkey: <kbd>X</kbd>.
                 </div>
@@ -872,10 +872,10 @@ export class HudAndMenuManager {
             </div>
             <div class="incinerator-actions">
               <button id="toggle-trash-mode-btn" type="button" class="incinerator-btn ${this.isTrashMode ? 'trash-on' : ''}">
-                ${this.isTrashMode ? '🔥 Trash Mode: ON (Click Any Slot to Dispose)' : '🗑️ Toggle Trash Mode: OFF'}
+                ${this.isTrashMode ? '🗑️ Trash Mode: ON (Click Any Slot to Dispose)' : '🗑️ Toggle Trash Mode: OFF'}
               </button>
               <button id="dispose-selected-btn" type="button" class="incinerator-btn" ${!activeSlot ? 'disabled' : ''}>
-                🔥 Dispose Held Slot #${this.player.selectedHotbarIndex + 1} (${activeItemDef ? activeItemDef.name : 'Empty'})
+                🗑️ Dispose Held Slot #${this.player.selectedHotbarIndex + 1} (${activeItemDef ? activeItemDef.name : 'Empty'})
               </button>
               <button id="sort-inventory-btn" type="button" class="incinerator-btn sort-btn">
                 ✨ Sort & Stack Bag
@@ -923,7 +923,7 @@ export class HudAndMenuManager {
         this.renderHotbar();
         this.renderCraftingAndInventoryTab();
         this.showBanner(
-          '🔥 ITEM INCINERATED',
+          '🗑️ ITEM DISPOSED',
           `Disposed ${res.count}x ${res.itemName} for +${res.xpGained} XP!`,
           '#c084fc'
         );
@@ -1069,7 +1069,7 @@ export class HudAndMenuManager {
               <div class="skills-hero-lvl">Hero Level ${this.player.level} (${this.player.xp} / ${
       this.player.xpToNext
     } XP)</div>
-              <div class="skills-hero-sub">Earn XP by mining ores, forging gear, slaying monsters, and incinerating unwanted items!</div>
+              <div class="skills-hero-sub">Earn XP by mining ores, forging gear, slaying monsters, and disposing of unwanted items!</div>
             </div>
             <div class="sp-counter-box">
               <span class="sp-num">${this.player.skillPoints}</span>
@@ -1159,7 +1159,7 @@ export class HudAndMenuManager {
     this.modalContent.innerHTML = `
       <div class="codex-wrap">
         <div class="codex-intro">
-          <h3>Aethelgard Custom 6-Tier Progression (No Netherite • No Ender Dragon)</h3>
+          <h3>funnyblockgame Custom 6-Tier Progression (No Netherite • No Ender Dragon)</h3>
           ${
             cheatsOn
               ? `
@@ -1240,7 +1240,7 @@ export class HudAndMenuManager {
           <div class="help-item"><kbd>X</kbd> / <kbd>Shift+X</kbd> Dispose 1 Held Item / Entire Stack into Bonus XP & Mana</div>
           <div class="help-item"><kbd>B</kbd> Sanctuary Recall (Teleport back to Spawn Sanctuary & heal)</div>
           <div class="help-item"><kbd>V</kbd> Toggle 1st-Person / 3rd-Person Armored Hero Camera</div>
-          <div class="help-item"><kbd>E</kbd> Open Astral Forge, Inventory & Void Incinerator</div>
+          <div class="help-item"><kbd>E</kbd> Open Forge, Inventory & Item Trash</div>
           <div class="help-item"><kbd>K</kbd> Open Hero Skill Tree & Achievements</div>
           <div class="help-item"><kbd>P</kbd> Open 6-Tier Progression & Boss Codex</div>
         </div>

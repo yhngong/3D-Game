@@ -1,6 +1,6 @@
-# Aethelgard: Realms of the Astral Forge (3D Voxel Action-RPG)
+# funnyblockgame (3D Voxel Action-RPG)
 
-A 3D Minecraft-inspired voxel sandbox Action-RPG built with **Three.js + TypeScript + Vite** featuring a **completely original 6-Tier Progression System** (no Netherite, no Ender Dragon), **5 custom multi-phase bosses**, **8 custom 3D monsters**, and **mythic melee, ranged, and magic weapons with right-click abilities**.
+**funnyblockgame** is a 3D Minecraft-inspired voxel sandbox Action-RPG built with **Three.js + TypeScript + Vite** featuring a **completely original 6-Tier Progression System** (no Netherite, no Ender Dragon), **5 custom multi-phase bosses**, **8 custom 3D monsters**, **RPG Hero Leveling & Skill Tree**, **5 Mythic Trinkets**, and **custom melee, ranged, and magic weapons with right-click abilities**.
 
 ---
 
@@ -42,8 +42,12 @@ A 3D Minecraft-inspired voxel sandbox Action-RPG built with **Three.js + TypeScr
 - **Left Click (Hold)**: Mine Voxel Blocks / Swing Melee Weapon / Fire Ranged Weapon
 - **Right Click**: Activate Weapon Special Ability / Place Selected Block / Use Potion or Boss Summon Relic
 - **1 – 9** or **Mouse Wheel**: Select Hotbar Slot
-- **E**: Open Astral Forge (Crafting) & Inventory
-- **P**: Open 6-Tier Progression & Boss Codex (includes Sandbox Kit & Quick Boss Summon buttons)
+- **X** / **Shift+X**: Dispose of 1 Held Item / Entire Stack into Bonus XP & Mana
+- **B**: Sanctuary Recall (Teleport back to Spawn Sanctuary)
+- **V**: Toggle 1st-Person / 3rd-Person Armored Hero Camera
+- **E**: Open Forge, Inventory & Item Trash
+- **K**: Open Hero Skill Tree & Achievements
+- **P**: Open 6-Tier Progression & Boss Codex
 
 ---
 

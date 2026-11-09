@@ -1,5 +1,5 @@
 {
-  "name": "aethelgard-3d-voxel-rpg",
+  "name": "funnyblockgame",
   "private": true,
   "version": "1.0.0",
   "description": "3D Voxel Sandbox Action-RPG with 6-tier custom progression, custom monsters, custom bosses, and mythic weapons built with Three.js & TypeScript.",

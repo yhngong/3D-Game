@@ -52,7 +52,7 @@ export class PlayerController {
   public onAchievementCallback: ((ach: AchievementDef) => void) | null = null;
 
   // World & Cheats configuration
-  public worldName = 'Realm of Aethelgard';
+  public worldName = 'funnyblockgame World';
   public cheatsEnabled = false;
   public hasSavedWorld = false;
 
@@ -1029,7 +1029,7 @@ export class PlayerController {
   }
 
   public createNewWorld(worldName: string, seed: number, cheatsEnabled: boolean): void {
-    this.worldName = worldName.trim() || 'Realm of Aethelgard';
+    this.worldName = worldName.trim() || 'funnyblockgame World';
     this.cheatsEnabled = cheatsEnabled;
     this.unlockedTier = 1;
     this.defeatedBosses.clear();
