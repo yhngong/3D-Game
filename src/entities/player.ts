@@ -417,28 +417,33 @@ export class PlayerController {
 
     // Swing animation + walk bobbing
     const time = performance.now() * 0.006;
-    const bobX = isMoving ? Math.cos(time) * 0.025 : 0;
-    const bobY = isMoving ? Math.abs(Math.sin(time * 2)) * 0.03 : Math.sin(time * 0.4) * 0.008;
+    const bobX = isMoving ? Math.cos(time) * 0.022 : 0;
+    const bobY = isMoving ? Math.abs(Math.sin(time * 2)) * 0.028 : Math.sin(time * 0.4) * 0.008;
 
     let swingRotX = 0;
     let swingRotY = 0;
     let swingRotZ = 0;
+    let swingPushZ = 0;
+    let swingDropY = 0;
 
     if (this.isSwinging) {
-      this.swingAnimProgress += dt * 5.5;
+      this.swingAnimProgress += dt * 5.8;
       if (this.swingAnimProgress >= 1) {
         this.swingAnimProgress = 0;
         this.isSwinging = false;
       } else {
         const s = Math.sin(this.swingAnimProgress * Math.PI);
-        swingRotX = -s * 0.95;
-        swingRotY = s * 0.45;
-        swingRotZ = s * 0.35;
+        // Clean forward-and-downward chop toward the crosshair
+        swingRotX = -s * 1.18;
+        swingRotY = s * 0.22;
+        swingRotZ = s * 0.15;
+        swingPushZ = -s * 0.14;
+        swingDropY = -s * 0.08;
       }
     }
 
-    this.handGroup.position.set(0.42 + bobX, -0.34 + bobY, -0.58);
-    this.handGroup.rotation.set(0.15 + swingRotX, -0.25 + swingRotY, swingRotZ);
+    this.handGroup.position.set(0.38 + bobX, -0.34 + bobY + swingDropY, -0.55 + swingPushZ);
+    this.handGroup.rotation.set(-0.22 + swingRotX, 0.1 + swingRotY, 0.06 + swingRotZ);
   }
 
   private buildHeldMeshFor(item: ItemDef): void {
@@ -476,17 +481,19 @@ export class PlayerController {
       band2.position.set(0, -0.06, 0);
       this.heldMeshGroup.add(pommel, hilt, band1, band2);
 
+      // Note: -Z is forward (direction of swing/strike), X is thin side-to-side
       if (item.iconShape === 'scythe') {
         const pole = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.68, 0.048), handleMat);
         pole.position.set(0, 0.2, 0);
         const socket = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.08), secondaryMat);
         socket.position.set(0, 0.52, 0);
-        const bladeBase = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.09, 0.035), primaryMat);
-        bladeBase.position.set(-0.12, 0.54, 0);
-        bladeBase.rotation.z = 0.22;
-        const bladeTip = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.03), glowMat);
-        bladeTip.position.set(-0.29, 0.46, 0);
-        bladeTip.rotation.z = 0.65;
+        // Reaper blade extends forward (-Z)
+        const bladeBase = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.09, 0.28), primaryMat);
+        bladeBase.position.set(0, 0.54, -0.14);
+        bladeBase.rotation.x = -0.22;
+        const bladeTip = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.06, 0.24), glowMat);
+        bladeTip.position.set(0, 0.45, -0.32);
+        bladeTip.rotation.x = -0.65;
         this.heldMeshGroup.add(pole, socket, bladeBase, bladeTip);
         return;
       }
@@ -494,49 +501,51 @@ export class PlayerController {
       if (item.iconShape === 'hammer') {
         const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.56, 0.055), handleMat);
         shaft.position.set(0, 0.16, 0);
-        const headCore = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.18), primaryMat);
+        // Warhammer striking faces aligned along Z (-Z front strike face, +Z back face)
+        const headCore = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.36), primaryMat);
         headCore.position.set(0, 0.44, 0);
-        const faceL = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.22), secondaryMat);
-        faceL.position.set(-0.19, 0.44, 0);
-        const faceR = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.22), secondaryMat);
-        faceR.position.set(0.19, 0.44, 0);
+        const faceFront = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.05), secondaryMat);
+        faceFront.position.set(0, 0.44, -0.19);
+        const faceBack = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.05), secondaryMat);
+        faceBack.position.set(0, 0.44, 0.19);
         const topSpike = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.14, 4), glowMat);
         topSpike.position.set(0, 0.59, 0);
-        this.heldMeshGroup.add(shaft, headCore, faceL, faceR, topSpike);
+        this.heldMeshGroup.add(shaft, headCore, faceFront, faceBack, topSpike);
         return;
       }
 
-      // Detailed Crossguard with Wing Tips & Center Gem
+      // Detailed Crossguard & Blade oriented along Z (-Z is forward cutting edge!)
       const isGreat = item.iconShape === 'greatsword';
       const isKatana = item.iconShape === 'katana';
-      const guardWidth = isKatana ? 0.14 : isGreat ? 0.32 : 0.24;
-      const guard = new THREE.Mesh(new THREE.BoxGeometry(guardWidth, 0.05, 0.075), secondaryMat);
+      const guardSpan = isKatana ? 0.14 : isGreat ? 0.32 : 0.24;
+      const guard = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.05, guardSpan), secondaryMat);
       guard.position.set(0, 0.02, 0);
       const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.045, 0), glowMat);
-      gem.position.set(0, 0.02, 0.04);
+      gem.position.set(-0.04, 0.02, 0);
       this.heldMeshGroup.add(guard, gem);
 
       if (!isKatana) {
-        const wingL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.06), primaryMat);
-        wingL.position.set(-guardWidth * 0.5, 0.04, 0);
-        wingL.rotation.z = 0.35;
-        const wingR = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.06), primaryMat);
-        wingR.position.set(guardWidth * 0.5, 0.04, 0);
-        wingR.rotation.z = -0.35;
-        this.heldMeshGroup.add(wingL, wingR);
+        const wingFront = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.06), primaryMat);
+        wingFront.position.set(0, 0.04, -guardSpan * 0.5);
+        wingFront.rotation.x = -0.35;
+        const wingBack = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.06), primaryMat);
+        wingBack.position.set(0, 0.04, guardSpan * 0.5);
+        wingBack.rotation.x = 0.35;
+        this.heldMeshGroup.add(wingFront, wingBack);
       }
 
-      // Multi-part Tapered Blade + Glowing Fuller Core + Tip
+      // Multi-part Tapered Blade + Glowing Fuller Core + Tip (edge faces -Z forward)
       const bladeLen = isGreat ? 0.64 : isKatana ? 0.6 : 0.5;
-      const bladeWidth = isGreat ? 0.12 : isKatana ? 0.055 : 0.085;
-      const bladeBody = new THREE.Mesh(new THREE.BoxGeometry(bladeWidth, bladeLen, 0.028), primaryMat);
+      const bladeDepth = isGreat ? 0.12 : isKatana ? 0.055 : 0.085;
+      const bladeBody = new THREE.Mesh(new THREE.BoxGeometry(0.028, bladeLen, bladeDepth), primaryMat);
       bladeBody.position.set(0, 0.04 + bladeLen * 0.5, 0);
 
-      const fuller = new THREE.Mesh(new THREE.BoxGeometry(bladeWidth * 0.45, bladeLen * 0.82, 0.034), secondaryMat);
+      const fuller = new THREE.Mesh(new THREE.BoxGeometry(0.034, bladeLen * 0.82, bladeDepth * 0.45), secondaryMat);
       fuller.position.set(0, 0.04 + bladeLen * 0.46, 0);
 
-      const bladeTip = new THREE.Mesh(new THREE.ConeGeometry(bladeWidth * 0.65, 0.14, 4), primaryMat);
+      const bladeTip = new THREE.Mesh(new THREE.ConeGeometry(bladeDepth * 0.65, 0.14, 4), primaryMat);
       bladeTip.rotation.y = Math.PI / 4;
+      bladeTip.scale.set(0.35, 1, 1);
       bladeTip.position.set(0, 0.04 + bladeLen + 0.06, 0);
 
       this.heldMeshGroup.add(bladeBody, fuller, bladeTip);
@@ -551,27 +560,28 @@ export class PlayerController {
       this.heldMeshGroup.add(handle, collar);
 
       if (item.toolType === 'pickaxe') {
-        const centerHead = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.075, 0.065), primaryMat);
+        // Pickaxe prongs extend forward (-Z) and backward (+Z)
+        const centerHead = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.075, 0.22), primaryMat);
         centerHead.position.set(0, 0.35, 0);
-        const prongL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.055, 0.05), primaryMat);
-        prongL.position.set(-0.15, 0.32, 0);
-        prongL.rotation.z = 0.38;
-        const prongR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.055, 0.05), primaryMat);
-        prongR.position.set(0.15, 0.32, 0);
-        prongR.rotation.z = -0.38;
-        const tipL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.04), glowMat);
-        tipL.position.set(-0.22, 0.29, 0);
-        const tipR = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.04), glowMat);
-        tipR.position.set(0.22, 0.29, 0);
-        this.heldMeshGroup.add(centerHead, prongL, prongR, tipL, tipR);
+        const prongFront = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.055, 0.14), primaryMat);
+        prongFront.position.set(0, 0.32, -0.15);
+        prongFront.rotation.x = -0.38;
+        const prongBack = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.055, 0.14), primaryMat);
+        prongBack.position.set(0, 0.32, 0.15);
+        prongBack.rotation.x = 0.38;
+        const tipFront = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.06), glowMat);
+        tipFront.position.set(0, 0.29, -0.22);
+        const tipBack = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.06), glowMat);
+        tipBack.position.set(0, 0.29, 0.22);
+        this.heldMeshGroup.add(centerHead, prongFront, prongBack, tipFront, tipBack);
       } else {
-        // Bearded Hatchet / Axe
-        const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.16, 0.045), primaryMat);
-        cheek.position.set(-0.1, 0.33, 0);
-        const edge = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.22, 0.03), glowMat);
-        edge.position.set(-0.19, 0.32, 0);
-        const poll = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.055), secondaryMat);
-        poll.position.set(0.06, 0.34, 0);
+        // Bearded Hatchet / Axe facing forward (-Z)
+        const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.16, 0.18), primaryMat);
+        cheek.position.set(0, 0.33, -0.1);
+        const edge = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.22, 0.04), glowMat);
+        edge.position.set(0, 0.32, -0.19);
+        const poll = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.08, 0.08), secondaryMat);
+        poll.position.set(0, 0.34, 0.06);
         this.heldMeshGroup.add(cheek, edge, poll);
       }
       return;
