@@ -122,7 +122,7 @@ export class HudAndMenuManager {
         <div class="tracker-keys">
           <span><kbd>E</kbd> Forge & Bag</span>
           <span><kbd>P</kbd> Boss Codex</span>
-          <span><kbd>T</kbd> Day/Night</span>
+          <span id="key-hint-daylight" style="display:none;"><kbd>T</kbd> Day/Night</span>
           <span><kbd>RMB</kbd> Ability / Place</span>
         </div>
       </div>
@@ -437,6 +437,11 @@ export class HudAndMenuManager {
 
     const guide = PROGRESSION_GUIDE[this.player.unlockedTier];
     this.trackerStepsEl.innerHTML = guide.steps.map((s) => `<li>${s}</li>`).join('');
+
+    const dayHintEl = document.getElementById('key-hint-daylight');
+    if (dayHintEl) {
+      dayHintEl.style.display = this.player.cheatsEnabled ? 'inline' : 'none';
+    }
   }
 
   public renderHotbar(): void {

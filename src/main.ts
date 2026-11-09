@@ -223,9 +223,17 @@ class AethelgardGame {
         this.player.triggerDash();
       }
       if (e.code === 'KeyT') {
-        // Toggle between Midday (0.25) and Midnight (0.75)
-        const isNight = Math.sin(this.timeOfDay * Math.PI * 2) < 0;
-        this.timeOfDay = isNight ? 0.22 : 0.72;
+        if (this.player.cheatsEnabled) {
+          // Toggle between Midday (0.22) and Midnight (0.72) when cheats are active
+          const isNight = Math.sin(this.timeOfDay * Math.PI * 2) < 0;
+          this.timeOfDay = isNight ? 0.22 : 0.72;
+        } else {
+          this.ui.showBanner(
+            '🔒 CHEATS DISABLED',
+            'Changing the time of day [T] requires Allow Cheats: ON.',
+            '#f87171'
+          );
+        }
       }
 
       // Hotbar keys 1..9
