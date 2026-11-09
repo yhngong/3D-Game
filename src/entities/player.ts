@@ -66,6 +66,7 @@ export class PlayerController {
   public attackCooldownTimer = 0;
   public abilityCooldownTimer = 0;
   public dashCooldownTimer = 0;
+  public dashActiveTimer = 0;
   public recallCooldownTimer = 0;
   public hurtInvulnTimer = 0;
   public swingAnimProgress = 0;
@@ -524,11 +525,29 @@ export class PlayerController {
   public triggerDash(): boolean {
     if (this.dashCooldownTimer > 0) return false;
     this.dashCooldownTimer = this.getDashCooldownDuration();
-    const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-    this.velocity.x = forward.x * 16;
-    this.velocity.z = forward.z * 16;
-    this.velocity.y = Math.max(this.velocity.y, 4.4);
+    this.dashActiveTimer = 0.34;
+    this.hurtInvulnTimer = Math.max(this.hurtInvulnTimer, 0.34);
+
+    // Dash along WASD movement direction if held, otherwise forward along camera yaw
+    const dashDir = new THREE.Vector3();
+    if (this.keys['KeyW'] || this.keys['ArrowUp']) dashDir.z -= 1;
+    if (this.keys['KeyS'] || this.keys['ArrowDown']) dashDir.z += 1;
+    if (this.keys['KeyA'] || this.keys['ArrowLeft']) dashDir.x -= 1;
+    if (this.keys['KeyD'] || this.keys['ArrowRight']) dashDir.x += 1;
+
+    if (dashDir.lengthSq() > 0) {
+      dashDir.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+    } else {
+      dashDir.set(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+    }
+
+    const dashPower = 28 + (this.skills.agility || 0) * 1.2;
+    this.velocity.x = dashDir.x * dashPower;
+    this.velocity.z = dashDir.z * dashPower;
+    this.velocity.y = Math.max(this.velocity.y, 6.2);
+    this.onGround = false;
     sound.playSwordSwing(true);
+    sound.playMagicCast(1.35);
     return true;
   }
 
@@ -555,6 +574,7 @@ export class PlayerController {
     this.attackCooldownTimer = Math.max(0, this.attackCooldownTimer - dt);
     this.abilityCooldownTimer = Math.max(0, this.abilityCooldownTimer - dt);
     this.dashCooldownTimer = Math.max(0, this.dashCooldownTimer - dt);
+    this.dashActiveTimer = Math.max(0, this.dashActiveTimer - dt);
     this.recallCooldownTimer = Math.max(0, this.recallCooldownTimer - dt);
     this.hurtInvulnTimer = Math.max(0, this.hurtInvulnTimer - dt);
 
@@ -600,7 +620,8 @@ export class PlayerController {
     const targetVx = moveDir.x * baseSpeed;
     const targetVz = moveDir.z * baseSpeed;
 
-    const accel = this.onGround ? 18 : 8;
+    // Preserve high dash momentum while dashActiveTimer > 0 so the dash launches you much further!
+    const accel = this.dashActiveTimer > 0 ? 1.8 : this.onGround ? 18 : 8;
     this.velocity.x += (targetVx - this.velocity.x) * Math.min(1, accel * dt);
     this.velocity.z += (targetVz - this.velocity.z) * Math.min(1, accel * dt);
 

@@ -227,7 +227,13 @@ class AethelgardGame {
         this.player.handleJumpKeyPress();
       }
       if (e.code === 'KeyQ') {
-        this.player.triggerDash();
+        if (this.player.triggerDash()) {
+          const burstPos = this.player.position.clone().add(new THREE.Vector3(0, 0.9, 0));
+          this.entities.spawnShockwave(this.player.position, 4.2, '#38bdf8');
+          this.entities.spawnParticles(burstPos, '#38bdf8', 18, 6.5);
+          this.entities.spawnParticles(burstPos, '#c084fc', 14, 5.5);
+          this.entities.spawnParticles(burstPos, '#fde047', 10, 4.5);
+        }
       }
       if (e.code === 'KeyX') {
         // Dispose of 1 item (or entire stack if holding Shift) from currently selected hotbar slot
@@ -589,6 +595,12 @@ class AethelgardGame {
 
       if (!this.ui.isMenuOpen) {
         this.player.update(dt);
+        if (this.player.dashActiveTimer > 0) {
+          const trailPos = this.player.position.clone().add(new THREE.Vector3(0, 0.85, 0));
+          this.entities.spawnParticles(trailPos, '#38bdf8', 3, 2.8);
+          this.entities.spawnParticles(trailPos, '#c084fc', 2, 2.4);
+          this.entities.spawnParticles(trailPos, '#fde047', 1, 2.0);
+        }
         this.world.updateChunksAroundPlayer(this.player.position.x, this.player.position.z, 3);
         const { isNightTime, secondsRemaining } = this.updateAtmosphere(dt);
         this.entities.update(dt, isNightTime);
