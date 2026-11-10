@@ -454,7 +454,8 @@ export class HudAndMenuManager {
     targetBlockId: BlockId | null,
     breakProgress: number,
     isNightTime = false,
-    secondsUntilChange = 300
+    secondsUntilChange = 300,
+    rainSecondsRemaining = 0
   ): void {
     // Level & XP Bar
     this.levelBadgeEl.textContent = `LVL ${this.player.level}`;
@@ -492,11 +493,15 @@ export class HudAndMenuManager {
       this.dashBadgeEl.className = 'hud-badge';
     }
 
-    // Countdown timer until Night / Day
+    // Countdown timer until Night / Day + Tempest Storm status
     const mins = Math.floor(secondsUntilChange / 60);
     const secs = Math.floor(secondsUntilChange % 60);
     const timerStr = mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`;
-    if (isNightTime) {
+    if (rainSecondsRemaining > 0) {
+      this.daylightBadgeEl.textContent = `⛈️ Tempest (${Math.ceil(rainSecondsRemaining)}s • 2x Mobs!)`;
+      this.daylightBadgeEl.style.borderColor = '#38bdf8';
+      this.daylightBadgeEl.style.color = '#7dd3fc';
+    } else if (isNightTime) {
       this.daylightBadgeEl.textContent = `🌙 Night — Day in ${timerStr}`;
       this.daylightBadgeEl.style.borderColor = '#c084fc';
       this.daylightBadgeEl.style.color = '#e9d5ff';

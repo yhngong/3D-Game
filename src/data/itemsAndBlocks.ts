@@ -1635,6 +1635,30 @@ export const ITEMS: Record<string, ItemDef> = {
     secondaryColor: '#c084fc',
     iconShape: 'potion',
   },
+  sundial_totem: {
+    id: 'sundial_totem',
+    name: 'Sundial Totem',
+    tier: 1,
+    category: 'consumable',
+    description: 'Use (Left/Right Click) to instantly advance time to Nightfall or Dawn (and clear storms)!',
+    maxStack: 20,
+    totemEffect: 'sundial',
+    primaryColor: '#fde047',
+    secondaryColor: '#38bdf8',
+    iconShape: 'totem',
+  },
+  tempest_totem: {
+    id: 'tempest_totem',
+    name: 'Tempest Totem',
+    tier: 1,
+    category: 'consumable',
+    description: 'Use (Left/Right Click) to summon a Tempest Rainstorm — darkens skies & spawns 2x Monsters!',
+    maxStack: 20,
+    totemEffect: 'tempest',
+    primaryColor: '#0284c7',
+    secondaryColor: '#c084fc',
+    iconShape: 'totem',
+  },
 
   // ========================
   // 5 BOSS SUMMONING RELICS

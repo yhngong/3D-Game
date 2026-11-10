@@ -116,6 +116,30 @@ export const RECIPES: RecipeDef[] = [
       { itemId: 'block_dirt', count: 1 },
     ],
   },
+  {
+    id: 'craft_sundial_totem',
+    resultItemId: 'sundial_totem',
+    resultCount: 2,
+    tier: 1,
+    category: 'consumable',
+    station: 'Hand Crafting',
+    ingredients: [
+      { itemId: 'block_oak_planks', count: 2 },
+      { itemId: 'flint_shard', count: 1 },
+    ],
+  },
+  {
+    id: 'craft_tempest_totem',
+    resultItemId: 'tempest_totem',
+    resultCount: 2,
+    tier: 1,
+    category: 'consumable',
+    station: 'Hand Crafting',
+    ingredients: [
+      { itemId: 'block_oak_planks', count: 2 },
+      { itemId: 'block_dirt', count: 2 },
+    ],
+  },
 
   // ========================
   // TIER 2: VERDANT BRONZE & SYLVAN CORE

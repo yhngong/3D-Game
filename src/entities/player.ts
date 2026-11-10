@@ -189,6 +189,8 @@ export class PlayerController {
     this.inventory[4] = { itemId: 'sylvan_salve', count: 4 };
     this.inventory[5] = { itemId: 'block_torch', count: 16 };
     this.inventory[6] = { itemId: 'block_oak_planks', count: 24 };
+    this.inventory[7] = { itemId: 'sundial_totem', count: 2 };
+    this.inventory[8] = { itemId: 'tempest_totem', count: 2 };
     this.equippedArmorId = 'bramble_armor';
     this.equippedTrinketId = null;
   }
@@ -1036,6 +1038,19 @@ export class PlayerController {
         prod.position.set(0, 0.08, -0.32);
         this.heldMeshGroup.add(prod);
       }
+      return;
+    }
+
+    if (item.iconShape === 'totem') {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.36, 0.11), handleMat);
+      pillar.position.set(0, 0.14, 0);
+      const wings = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.07, 0.05), primaryMat);
+      wings.position.set(0, 0.22, 0);
+      const crest = new THREE.Mesh(new THREE.OctahedronGeometry(0.1, 0), glowMat);
+      crest.position.set(0, 0.38, 0);
+      const halo = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.018, 6, 16), secondaryMat);
+      halo.position.set(0, 0.38, 0);
+      this.heldMeshGroup.add(pillar, wings, crest, halo);
       return;
     }
 

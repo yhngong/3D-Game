@@ -144,14 +144,19 @@ export class EntityManager {
     this.player = player;
   }
 
-  public update(dt: number, isNightTime = false): void {
-    // Natural monster spawning ONLY happens at night; all monsters disappear when it becomes day!
-    if (isNightTime) {
+  public update(dt: number, isNightTime = false, isRaining = false): void {
+    // Monsters spawn at Night OR during Tempest Rainstorms (at 2x spawn rate & 2x max cap!)
+    if (isNightTime || isRaining) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
-        this.spawnTimer = this.activeBoss ? 6.0 : 2.8;
-        if (this.monsters.length < 14) {
-          this.spawnBiomeMonsterNearPlayer();
+        const baseInterval = this.activeBoss ? 6.0 : 2.8;
+        this.spawnTimer = isRaining ? baseInterval * 0.5 : baseInterval;
+        const maxMonsters = isRaining ? 28 : 14;
+        const perWave = isRaining ? 2 : 1;
+        for (let w = 0; w < perWave; w++) {
+          if (this.monsters.length < maxMonsters) {
+            this.spawnBiomeMonsterNearPlayer();
+          }
         }
       }
     } else if (this.monsters.length > 0) {
@@ -164,6 +169,14 @@ export class EntityManager {
     this.updateDroppedItems(dt);
     this.updateParticles(dt);
     this.updateShockwaves(dt);
+  }
+
+  public spawnStormSurgeMonsters(count = 4): void {
+    for (let i = 0; i < count; i++) {
+      if (this.monsters.length < 28) {
+        this.spawnBiomeMonsterNearPlayer();
+      }
+    }
   }
 
   public despawnAllMonsters(): void {

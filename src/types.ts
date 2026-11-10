@@ -130,8 +130,9 @@ export interface ItemDef {
   healMana?: number;
   buffType?: 'regen' | 'strength' | 'haste' | 'cosmic';
   buffDuration?: number;
-  // Boss summon
+  // Boss summon & World totems
   summonsBossId?: string;
+  totemEffect?: 'sundial' | 'tempest';
   // Visual icon colors
   primaryColor: string;
   secondaryColor: string;

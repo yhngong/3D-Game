@@ -24,6 +24,8 @@ class AethelgardGame {
   private ambientLight!: THREE.AmbientLight;
   private playerLight!: THREE.PointLight;
   private starField!: THREE.Points;
+  private rainSystem!: THREE.LineSegments;
+  private rainDrops: { x: number; y: number; z: number; speed: number }[] = [];
   private sunMesh!: THREE.Mesh;
   private moonMesh!: THREE.Mesh;
 
@@ -38,6 +40,8 @@ class AethelgardGame {
   private readonly dayDurationSec = 300;
   private readonly nightDurationSec = 60;
   private wasNightTime = false;
+  private rainTimer = 0; // > 0 when Tempest Totem storm is active (2x monsters!)
+  private lightningFlashTimer = 0;
 
   constructor() {
     this.initScene();
@@ -103,6 +107,31 @@ class AethelgardGame {
       new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
     );
     this.scene.add(this.moonMesh);
+
+    // 3D Falling Rain Streaks for Tempest Totem Storms
+    const rainCount = 600;
+    const rainVertices = new Float32Array(rainCount * 6);
+    for (let i = 0; i < rainCount; i++) {
+      const rx = (Math.random() - 0.5) * 48;
+      const ry = Math.random() * 28;
+      const rz = (Math.random() - 0.5) * 48;
+      const spd = 22 + Math.random() * 10;
+      this.rainDrops.push({ x: rx, y: ry, z: rz, speed: spd });
+      rainVertices[i * 6] = rx;
+      rainVertices[i * 6 + 1] = ry;
+      rainVertices[i * 6 + 2] = rz;
+      rainVertices[i * 6 + 3] = rx - 0.12;
+      rainVertices[i * 6 + 4] = ry - 0.85;
+      rainVertices[i * 6 + 5] = rz;
+    }
+    const rainGeo = new THREE.BufferGeometry();
+    rainGeo.setAttribute('position', new THREE.BufferAttribute(rainVertices, 3));
+    this.rainSystem = new THREE.LineSegments(
+      rainGeo,
+      new THREE.LineBasicMaterial({ color: '#7dd3fc', transparent: true, opacity: 0.68 })
+    );
+    this.rainSystem.visible = false;
+    this.scene.add(this.rainSystem);
 
     // Target Voxel Wireframe Box
     const boxGeo = new THREE.BoxGeometry(1.006, 1.006, 1.006);
@@ -323,6 +352,11 @@ class AethelgardGame {
       return;
     }
 
+    if (item && item.totemEffect) {
+      this.useWorldTotem(item);
+      return;
+    }
+
     if (item && item.category === 'consumable') {
       this.consumeSelectedPotion(item);
       return;
@@ -350,6 +384,11 @@ class AethelgardGame {
         this.player.removeItem(item.id, 1);
         this.ui.renderHotbar();
       }
+      return;
+    }
+
+    if (item.totemEffect) {
+      this.useWorldTotem(item);
       return;
     }
 
@@ -385,6 +424,62 @@ class AethelgardGame {
           this.ui.renderHotbar();
         }
       }
+    }
+  }
+
+  private useWorldTotem(item: typeof ITEMS[string]): void {
+    const burstPos = this.player.position.clone().add(new THREE.Vector3(0, 1.4, 0));
+
+    if (item.totemEffect === 'sundial') {
+      const currentlyNight = this.timeOfDay >= 0.5;
+      if (currentlyNight) {
+        // Advance Night -> Dawn & clear any Tempest storm!
+        this.timeOfDay = 0.03;
+        this.wasNightTime = false;
+        this.rainTimer = 0;
+        this.entities.despawnAllMonsters();
+        sound.playFanfare();
+        this.entities.spawnShockwave(this.player.position, 8.0, '#fde047');
+        this.entities.spawnParticles(burstPos, '#fde047', 26, 6);
+        this.ui.showBanner(
+          '☀️ SUNDIAL TOTEM — DAWN BREAKS!',
+          'Advanced time to Day & cleared the skies — all monsters vanished!',
+          '#fde047'
+        );
+      } else {
+        // Advance Day -> Nightfall!
+        this.timeOfDay = 0.51;
+        this.wasNightTime = true;
+        sound.playMagicCast(0.7);
+        this.entities.spawnShockwave(this.player.position, 8.0, '#c084fc');
+        this.entities.spawnParticles(burstPos, '#c084fc', 26, 6);
+        this.ui.showBanner(
+          '🌙 SUNDIAL TOTEM — NIGHTFALL!',
+          'Advanced time to Night — nocturnal monsters now stalk the realm!',
+          '#c084fc'
+        );
+      }
+      this.player.removeItem(item.id, 1);
+      this.ui.renderHotbar();
+      return;
+    }
+
+    if (item.totemEffect === 'tempest') {
+      this.rainTimer = 90;
+      this.lightningFlashTimer = 0.28;
+      sound.playExplosion();
+      sound.playMagicCast(0.5);
+      this.entities.spawnShockwave(this.player.position, 10.0, '#38bdf8');
+      this.entities.spawnParticles(burstPos, '#38bdf8', 28, 6.5);
+      this.entities.spawnParticles(burstPos, '#c084fc', 18, 5.5);
+      this.entities.spawnStormSurgeMonsters(4);
+      this.ui.showBanner(
+        '⛈️ TEMPEST TOTEM — STORM UNLEASHED!',
+        'Torrential Rain & Thunderclouds active (90s) — Spawning 2x Monsters!',
+        '#38bdf8'
+      );
+      this.player.removeItem(item.id, 1);
+      this.ui.renderHotbar();
     }
   }
 
@@ -502,7 +597,48 @@ class AethelgardGame {
     return { targetBlockId: hit.blockId, progress: this.miningProgress };
   }
 
-  private updateAtmosphere(dt: number): { isNightTime: boolean; secondsRemaining: number } {
+  private updateAtmosphere(dt: number): { isNightTime: boolean; secondsRemaining: number; isRaining: boolean } {
+    if (this.rainTimer > 0) {
+      this.rainTimer = Math.max(0, this.rainTimer - dt);
+      if (this.rainTimer === 0) {
+        this.ui.showBanner('🌤️ TEMPEST CLEARED', 'The rainstorm has subsided.', '#7dd3fc');
+      }
+    }
+    const isRaining = this.rainTimer > 0;
+
+    // Update 3D Falling Rain Streaks around player
+    this.rainSystem.visible = isRaining;
+    if (isRaining) {
+      this.rainSystem.position.set(this.player.position.x, this.player.position.y - 6, this.player.position.z);
+      const posAttr = this.rainSystem.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const arr = posAttr.array as Float32Array;
+      for (let i = 0; i < this.rainDrops.length; i++) {
+        const drop = this.rainDrops[i];
+        drop.y -= drop.speed * dt;
+        drop.x -= 2.8 * dt;
+        if (drop.y < 0) {
+          drop.y = 26 + Math.random() * 4;
+          drop.x = (Math.random() - 0.5) * 48;
+          drop.z = (Math.random() - 0.5) * 48;
+        }
+        arr[i * 6] = drop.x;
+        arr[i * 6 + 1] = drop.y;
+        arr[i * 6 + 2] = drop.z;
+        arr[i * 6 + 3] = drop.x - 0.12;
+        arr[i * 6 + 4] = drop.y - 0.9;
+        arr[i * 6 + 5] = drop.z;
+      }
+      posAttr.needsUpdate = true;
+
+      // Occasional distant lightning flash during Tempest storms!
+      this.lightningFlashTimer = Math.max(0, this.lightningFlashTimer - dt);
+      if (this.lightningFlashTimer <= 0 && Math.random() < dt * 0.14) {
+        this.lightningFlashTimer = 0.18;
+      }
+    } else {
+      this.lightningFlashTimer = 0;
+    }
+
     // 5-Minute Days (300s) & 1-Minute Nights (60s)
     const currentlyNight = this.timeOfDay >= 0.5;
     const rate = currentlyNight ? 0.5 / this.nightDurationSec : 0.5 / this.dayDurationSec;
@@ -524,7 +660,7 @@ class AethelgardGame {
           'Hostile Monsters are now spawning in the darkness!',
           '#c084fc'
         );
-      } else {
+      } else if (!isRaining) {
         this.entities.despawnAllMonsters();
         this.ui.showBanner(
           '☀️ DAWN BREAKS',
@@ -547,19 +683,20 @@ class AethelgardGame {
       this.player.position.z - 25
     );
     this.sunLight.position.copy(this.sunMesh.position);
+    this.sunMesh.visible = !isRaining;
 
-    // Adjust sunlight & ambient intensity for Day vs Night
-    const dayFactor = Math.max(0, sunHeight);
-    this.sunLight.intensity = 0.2 + dayFactor * 1.05;
-    this.ambientLight.intensity = 0.28 + dayFactor * 0.45;
-    (this.starField.material as THREE.PointsMaterial).opacity = isNightTime
-      ? Math.min(0.9, -sunHeight * 1.2)
-      : 0.08;
+    // Adjust sunlight & ambient intensity for Day, Night, and Tempest Storm
+    const dayFactor = isRaining ? Math.max(0, sunHeight) * 0.22 : Math.max(0, sunHeight);
+    const flashBoost = this.lightningFlashTimer > 0 ? 1.4 : 0;
+    this.sunLight.intensity = 0.2 + dayFactor * 1.05 + flashBoost;
+    this.ambientLight.intensity = 0.28 + dayFactor * 0.45 + flashBoost * 0.5;
+    (this.starField.material as THREE.PointsMaterial).opacity =
+      isNightTime && !isRaining ? Math.min(0.9, -sunHeight * 1.2) : 0.04;
 
     this.playerLight.position.copy(this.player.camera.position);
     this.starField.position.set(this.player.position.x, 0, this.player.position.z);
 
-    // Biome & Day/Night dynamic sky tinting
+    // Biome, Storm & Day/Night dynamic sky tinting
     const biome = this.world.getBiomeAt(this.player.position.x, this.player.position.z);
     let skyColor = new THREE.Color('#38bdf8');
     if (this.entities.activeBoss) {
@@ -567,6 +704,8 @@ class AethelgardGame {
         new THREE.Color('#0f172a'),
         0.5
       );
+    } else if (isRaining) {
+      skyColor = new THREE.Color(this.lightningFlashTimer > 0 ? '#64748b' : '#0f172a');
     } else if (biome === 'scorched_wastes') {
       skyColor = new THREE.Color('#7c2d12');
     } else if (biome === 'astral_rifts') {
@@ -576,17 +715,17 @@ class AethelgardGame {
     }
 
     // Sunset/Dawn warm glow near horizon
-    if (Math.abs(sunHeight) < 0.22 && !this.entities.activeBoss) {
+    if (Math.abs(sunHeight) < 0.22 && !this.entities.activeBoss && !isRaining) {
       skyColor.lerp(new THREE.Color('#f97316'), 0.45);
     }
 
-    if (isNightTime && !this.entities.activeBoss) {
+    if (isNightTime && !this.entities.activeBoss && !isRaining) {
       skyColor.lerp(new THREE.Color('#060913'), Math.min(0.88, -sunHeight * 1.15));
     }
 
-    (this.scene.background as THREE.Color).lerp(skyColor, Math.min(1, dt * 2.5));
+    (this.scene.background as THREE.Color).lerp(skyColor, Math.min(1, dt * (this.lightningFlashTimer > 0 ? 18 : 2.5)));
     (this.scene.fog as THREE.FogExp2).color.copy(this.scene.background as THREE.Color);
-    return { isNightTime, secondsRemaining };
+    return { isNightTime, secondsRemaining, isRaining };
   }
 
   private animate(): void {
@@ -606,10 +745,16 @@ class AethelgardGame {
           this.entities.spawnParticles(trailPos, '#fde047', 1, 2.0);
         }
         this.world.updateChunksAroundPlayer(this.player.position.x, this.player.position.z, 3);
-        const { isNightTime, secondsRemaining } = this.updateAtmosphere(dt);
-        this.entities.update(dt, isNightTime);
+        const { isNightTime, secondsRemaining, isRaining } = this.updateAtmosphere(dt);
+        this.entities.update(dt, isNightTime, isRaining);
         const miningState = this.updateMiningAndTargeting(dt);
-        this.ui.updateHud(miningState.targetBlockId, miningState.progress, isNightTime, secondsRemaining);
+        this.ui.updateHud(
+          miningState.targetBlockId,
+          miningState.progress,
+          isNightTime,
+          secondsRemaining,
+          this.rainTimer
+        );
       }
 
       this.renderer.render(this.scene, this.camera);
