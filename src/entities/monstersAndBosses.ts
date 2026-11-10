@@ -3,12 +3,13 @@ import { sound } from '../audio/soundEngine';
 import { BLOCKS, BOSSES, ITEMS, MONSTERS } from '../data/itemsAndBlocks';
 import {
   ActiveProjectile,
+  BlockId,
   BossDef,
   DroppedItemEntity,
   MonsterDef,
   ProgressionTier,
 } from '../types';
-import { VoxelWorld } from '../world/voxelWorld';
+import { SEA_LEVEL, VoxelWorld } from '../world/voxelWorld';
 import { PlayerController } from './player';
 
 export interface ActiveMonster {
@@ -103,6 +104,7 @@ export interface ActiveBoss {
   subNodes: BossSubNode[];
   clones: BossMirrorClone[];
   shieldMesh: THREE.Mesh | null;
+  waterLevelY: number;
 }
 
 interface Particle3D {
@@ -291,26 +293,78 @@ export class EntityManager {
         ? `🛡️ ${b.subNodes.length} Starlight Shield Pylons Orbiting — Shatter Pylons First!`
         : '✨ Astral Barrier Shattered — Vulnerable!';
     }
+    if (b.def.modelType === 'nessie_boss') {
+      return this.player.inWater
+        ? '🌊 Aquatic Duel Active — Melee Strikes Enabled! Dodge Hydro Barrages!'
+        : '🦕 Projectiles Deal 0 DMG! Dive into the Water to Hurt Nessie!';
+    }
     return '';
   }
 
-  public summonBoss(bossId: string): boolean {
+  private isWaterColumn(wx: number, wz: number, waterY: number): boolean {
+    const bx = Math.floor(wx);
+    const bz = Math.floor(wz);
+    return (
+      this.world.getBlock(bx, waterY, bz) === BlockId.Water ||
+      this.world.getBlock(bx, waterY - 1, bz) === BlockId.Water ||
+      this.world.getBlock(bx, SEA_LEVEL, bz) === BlockId.Water
+    );
+  }
+
+  private findNearestWaterVoxel(origin: THREE.Vector3, maxRadius = 38): THREE.Vector3 | null {
+    const ox = Math.floor(origin.x);
+    const oz = Math.floor(origin.z);
+    for (let r = 1; r <= maxRadius; r++) {
+      for (let dx = -r; dx <= r; dx += 2) {
+        for (let dz = -r; dz <= r; dz += 2) {
+          if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue;
+          const wx = ox + dx;
+          const wz = oz + dz;
+          if (this.world.getBlock(wx, SEA_LEVEL, wz) === BlockId.Water) {
+            return new THREE.Vector3(wx, SEA_LEVEL, wz);
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  public summonBoss(bossId: string, customWaterVoxel?: THREE.Vector3): boolean {
     const def = BOSSES[bossId];
     if (!def) return false;
 
+    let pos: THREE.Vector3;
+    let waterLevelY = SEA_LEVEL;
+
+    if (def.modelType === 'nessie_boss') {
+      const waterVox = customWaterVoxel || this.findNearestWaterVoxel(this.player.position, 42);
+      if (!waterVox) {
+        if (this.onBannerNotification) {
+          this.onBannerNotification(
+            '🌊 NO WATER NEARBY!',
+            'Find a lake or river and Right-Click the water while holding the Crown of Aethelgard!',
+            '#38bdf8'
+          );
+        }
+        return false;
+      }
+      waterLevelY = Math.floor(waterVox.y);
+      pos = new THREE.Vector3(waterVox.x + 0.5, waterLevelY + 0.35, waterVox.z + 0.5);
+    } else {
+      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        this.player.yaw
+      );
+      const sx = this.player.position.x + forward.x * 14;
+      const sz = this.player.position.z + forward.z * 14;
+      const sy =
+        this.world.getSurfaceHeight(Math.floor(sx), Math.floor(sz)) +
+        (def.modelType === 'frost_boss' ? 10.5 : 2.0);
+      pos = new THREE.Vector3(sx, sy, sz);
+    }
+
     // Remove existing boss & all sub-entities cleanly
     this.cleanupActiveBoss();
-
-    const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      this.player.yaw
-    );
-    const sx = this.player.position.x + forward.x * 14;
-    const sz = this.player.position.z + forward.z * 14;
-    const sy =
-      this.world.getSurfaceHeight(Math.floor(sx), Math.floor(sz)) +
-      (def.modelType === 'frost_boss' ? 10.5 : 2.0);
-    const pos = new THREE.Vector3(sx, sy, sz);
 
     const built = this.buildBossModel(def);
     built.rootGroup.position.copy(pos);
@@ -348,6 +402,7 @@ export class EntityManager {
       subNodes: [],
       clones: [],
       shieldMesh: built.shieldMesh,
+      waterLevelY,
     };
 
     this.activeBoss = boss;
@@ -848,6 +903,72 @@ export class EntityManager {
       const snap = Math.sin(nowSec * 10) * 0.35;
       b.leftArm.rotation.y = snap;
       b.rightArm.rotation.y = -snap;
+    } else if (b.def.modelType === 'nessie_boss') {
+      // NESSIE: Secret Aquatic Leviathan — Strictly Bound to Water!
+      b.orbitAngle += dt * 0.85 * phase.speedMult * chillMult;
+      const spd = b.def.speed * phase.speedMult * chillMult;
+
+      if (this.player.inWater && dist > 0.1) {
+        // Player is in the water! Swim aggressively & weave around them for an aquatic duel!
+        const targetAngle = Math.atan2(dx, dz) + Math.sin(nowSec * 2.4) * 0.38;
+        b.yaw = targetAngle;
+        if (dist > 2.8) {
+          b.velocity.x = Math.sin(targetAngle) * spd;
+          b.velocity.z = Math.cos(targetAngle) * spd;
+        } else {
+          b.velocity.x *= 0.82;
+          b.velocity.z *= 0.82;
+        }
+      } else {
+        // Player is on dry land! Patrol inside the water & face the player to unleash ranged hydro barrages!
+        b.yaw = dist > 0.1 ? Math.atan2(dx, dz) : b.orbitAngle;
+        b.velocity.x = Math.cos(b.orbitAngle) * spd * 0.65;
+        b.velocity.z = Math.sin(b.orbitAngle) * spd * 0.65;
+      }
+
+      // STRICT WATER BOUNDARY: Nessie can NEVER move out of Water blocks!
+      const nextX = b.position.x + b.velocity.x * dt;
+      if (
+        this.isWaterColumn(nextX, b.position.z, b.waterLevelY) &&
+        this.isWaterColumn(nextX + Math.sign(b.velocity.x) * 0.8, b.position.z, b.waterLevelY)
+      ) {
+        b.position.x = nextX;
+      } else {
+        b.velocity.x = -b.velocity.x * 0.75;
+        b.orbitAngle += Math.PI * 0.65;
+      }
+
+      const nextZ = b.position.z + b.velocity.z * dt;
+      if (
+        this.isWaterColumn(b.position.x, nextZ, b.waterLevelY) &&
+        this.isWaterColumn(b.position.x, nextZ + Math.sign(b.velocity.z) * 0.8, b.waterLevelY)
+      ) {
+        b.position.z = nextZ;
+      } else {
+        b.velocity.z = -b.velocity.z * 0.75;
+        b.orbitAngle += Math.PI * 0.65;
+      }
+
+      // Bob majestically at the water surface & churn seafoam wakes
+      b.position.y = b.waterLevelY + 0.38 + Math.sin(nowSec * 2.8) * 0.22;
+      if (Math.random() < dt * 7) {
+        this.spawnParticles(
+          b.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 3.2, 0.4, (Math.random() - 0.5) * 3.2)),
+          '#2dd4bf',
+          2,
+          3.2
+        );
+      }
+
+      // Paddling Plesiosaur Flippers & Swaying Sea-Serpent Tail
+      const paddle = Math.sin(nowSec * 6.5) * 0.55;
+      b.leftArm.rotation.z = 0.25 + paddle;
+      b.rightArm.rotation.z = -0.25 - paddle;
+      b.leftLeg.rotation.z = 0.25 - paddle;
+      b.rightLeg.rotation.z = -0.25 + paddle;
+      if (b.haloRing1) {
+        b.haloRing1.rotation.y = Math.sin(nowSec * 5.2) * 0.38;
+      }
     } else if (b.def.modelType === 'void_boss' || b.def.modelType === 'astral_boss') {
       // MALAKOR (Void Illusionist) & AETHELGARD (Six-Winged Astral Seraph)
       if (dist > 0.1) {
@@ -967,8 +1088,8 @@ export class EntityManager {
     b.rootGroup.position.copy(b.position);
     b.rootGroup.rotation.y = b.yaw;
 
-    // Rotate boss halo rings if present
-    if (b.haloRing1) {
+    // Rotate boss halo rings if present (except Nessie where haloRing1 is its swaying tail!)
+    if (b.haloRing1 && b.def.modelType !== 'nessie_boss') {
       b.haloRing1.rotation.z += dt * 1.6;
       b.haloRing1.rotation.x += dt * 0.9;
     }
@@ -1330,6 +1451,117 @@ export class EntityManager {
             damage: b.def.damage,
             radius: 0.42,
             color: '#38bdf8',
+            maxLife: 3.4,
+            gravity: 0,
+          });
+        }
+        break;
+      }
+
+      case 'hydro_cannon_barrage': {
+        // Fires pressurized seafoam hydro-jets from Nessie's towering plesiosaur jaws!
+        const mouthPos = b.position.clone().add(new THREE.Vector3(Math.sin(b.yaw) * 2.4, 4.1, Math.cos(b.yaw) * 2.4));
+        const mouthToPlayer = this.player.position
+          .clone()
+          .add(new THREE.Vector3(0, 1.0, 0))
+          .sub(mouthPos)
+          .normalize();
+        const count = 9;
+        for (let i = 0; i < count; i++) {
+          const offsetAngle = (i - 4) * 0.12;
+          const dir = mouthToPlayer.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), offsetAngle);
+          this.spawnProjectile({
+            position: mouthPos.clone(),
+            velocity: dir.multiplyScalar(28),
+            fromPlayer: false,
+            damage: b.def.damage,
+            radius: 0.44,
+            color: i === 4 ? '#fde047' : '#2dd4bf',
+            maxLife: 3.8,
+            gravity: 0,
+            homing: i === 4,
+            explosiveRadius: i === 4 ? 3.4 : undefined,
+          });
+        }
+        sound.playMagicCast(1.1);
+        break;
+      }
+
+      case 'tidal_maelstrom': {
+        const mouthPos = b.position.clone().add(new THREE.Vector3(0, 2.8, 0));
+        const bolts = 16;
+        for (let i = 0; i < bolts; i++) {
+          const angle = (i / bolts) * Math.PI * 2 + performance.now() * 0.0025;
+          const dir = new THREE.Vector3(Math.cos(angle), 0.02, Math.sin(angle)).normalize();
+          this.spawnProjectile({
+            position: mouthPos.clone(),
+            velocity: dir.multiplyScalar(21),
+            fromPlayer: false,
+            damage: b.def.damage,
+            radius: 0.42,
+            color: '#38bdf8',
+            maxLife: 3.6,
+            gravity: 0,
+          });
+        }
+        // Aimed triple hydro-lance straight at player!
+        for (let j = -1; j <= 1; j++) {
+          const aimed = toPlayer.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), j * 0.1);
+          this.spawnProjectile({
+            position: mouthPos.clone(),
+            velocity: aimed.multiplyScalar(30),
+            fromPlayer: false,
+            damage: Math.round(b.def.damage * 1.08),
+            radius: 0.46,
+            color: '#2dd4bf',
+            maxLife: 3.4,
+            gravity: 0,
+          });
+        }
+        sound.playMagicCast(1.35);
+        break;
+      }
+
+      case 'geyser_eruption': {
+        for (let i = 0; i < 8; i++) {
+          const skyPos = this.player.position
+            .clone()
+            .add(new THREE.Vector3((Math.random() - 0.5) * 11, 14 + i * 1.3, (Math.random() - 0.5) * 11));
+          this.spawnProjectile({
+            position: skyPos,
+            velocity: new THREE.Vector3(0, -25, 0),
+            fromPlayer: false,
+            damage: b.def.damage,
+            radius: 0.62,
+            color: '#2dd4bf',
+            maxLife: 2.5,
+            gravity: 5.5,
+            explosiveRadius: 4.4,
+          });
+        }
+        sound.playExplosion();
+        break;
+      }
+
+      case 'whirlpool_undertow': {
+        // Churns a raging whirlpool that drags the player toward Nessie's water!
+        this.spawnShockwave(b.position, 16.5, '#2dd4bf');
+        this.spawnParticles(center, '#38bdf8', 36, 8);
+        sound.playExplosion();
+        const pullDir = b.position.clone().sub(this.player.position).normalize();
+        this.player.velocity.x += pullDir.x * 19;
+        this.player.velocity.z += pullDir.z * 19;
+        this.player.velocity.y = 5.5;
+        for (let i = 0; i < 12; i++) {
+          const angle = (i / 12) * Math.PI * 2;
+          const dir = new THREE.Vector3(Math.cos(angle), 0.04, Math.sin(angle)).normalize();
+          this.spawnProjectile({
+            position: center.clone(),
+            velocity: dir.multiplyScalar(22),
+            fromPlayer: false,
+            damage: b.def.damage,
+            radius: 0.42,
+            color: '#2dd4bf',
             maxLife: 3.4,
             gravity: 0,
           });
@@ -1924,6 +2156,14 @@ export class EntityManager {
         }
         return;
       }
+      // Nessie ignores projectile/dry-land AoE blasts — must dive into the water & strike directly!
+      if (b.def.modelType === 'nessie_boss') {
+        if (this.player.inWater && b.position.distanceTo(center) <= radius + 3.0) {
+          this.applyStatusToEntity(b, effect);
+          this.damageBoss(damage, '#2dd4bf', true);
+        }
+        return;
+      }
       if (b.position.distanceTo(center) <= radius + 2.2) {
         this.applyStatusToEntity(b, effect);
         this.damageBoss(damage, '#fde047', true);
@@ -1985,6 +2225,23 @@ export class EntityManager {
       const vuln = this.getVulnerableCentipedeSegment(b);
       if (vuln) {
         this.damageCentipedeSegment(b, vuln, amount, color, isCrit);
+      }
+      return;
+    }
+
+    // NESSIE: Must be IN THE WATER to hurt Nessie with melee attacks!
+    if (b.def.modelType === 'nessie_boss' && !silent && !this.player.inWater) {
+      sound.playBlockHit(0.75);
+      this.spawnParticles(b.position.clone().add(new THREE.Vector3(0, 2.2, 0)), '#38bdf8', 12, 4.5);
+      if (this.onDamageNumber) {
+        this.onDamageNumber(b.position.clone().add(new THREE.Vector3(0, 3.4, 0)), 0, '#38bdf8', false);
+      }
+      if (this.onBannerNotification) {
+        this.onBannerNotification(
+          '🌊 DIVE INTO THE WATER!',
+          'Attacks from dry land bounce off Nessie — jump into the water to fight it!',
+          '#2dd4bf'
+        );
       }
       return;
     }
@@ -2068,6 +2325,7 @@ export class EntityManager {
     if (defeatedDef.id === 'boss_ignis_rex') this.player.unlockAchievement('slay_ignis');
     if (defeatedDef.id === 'boss_malakor') this.player.unlockAchievement('slay_malakor');
     if (defeatedDef.id === 'boss_aethelgard') this.player.unlockAchievement('slay_aethelgard');
+    if (defeatedDef.id === 'boss_nessie') this.player.unlockAchievement('slay_nessie');
     this.player.savePlayerState();
 
     if (this.onBannerNotification) {
@@ -2254,8 +2512,26 @@ export class EntityManager {
             }
           }
 
-          // 4. Standard Boss Body Hit
-          if (!hitSomething && b.def.modelType !== 'molten_boss') {
+          // 4. Secret Boss NESSIE: Projectiles deal ZERO damage & bounce off its mythic scales!
+          if (!hitSomething && b.def.modelType === 'nessie_boss') {
+            const nessieBody = b.position.clone().add(new THREE.Vector3(0, 1.8, 0));
+            const nessieHead = b.position.clone().add(new THREE.Vector3(Math.sin(b.yaw) * 2.0, 3.8, Math.cos(b.yaw) * 2.0));
+            if (
+              p.position.distanceTo(nessieBody) <= 3.2 + p.radius ||
+              p.position.distanceTo(nessieHead) <= 2.4 + p.radius
+            ) {
+              sound.playBlockHit(0.7);
+              this.spawnParticles(p.position, '#2dd4bf', 12, 4.5);
+              if (this.onDamageNumber) {
+                this.onDamageNumber(p.position.clone().add(new THREE.Vector3(0, 0.8, 0)), 0, '#38bdf8', false);
+              }
+              hitSomething = true;
+              forceStopProjectile = true;
+            }
+          }
+
+          // 5. Standard Boss Body Hit
+          if (!hitSomething && b.def.modelType !== 'molten_boss' && b.def.modelType !== 'nessie_boss') {
             const bossCenter = b.position.clone().add(new THREE.Vector3(0, 2.2, 0));
             if (p.position.distanceTo(bossCenter) <= 2.5 + p.radius) {
               this.applyStatusToEntity(b, p.statusEffect);
@@ -3298,6 +3574,107 @@ export class EntityManager {
       haloRing1 = new THREE.Mesh(new THREE.TorusGeometry(1.45 * s, 0.07 * s, 8, 24), accentMat);
       haloRing1.position.set(0, 2.1 * s, -0.25 * s);
       rootGroup.add(leftArm, rightArm, leftLeg, rightLeg, haloRing1);
+    } else if (def.modelType === 'nessie_boss') {
+      // =====================================================
+      // NESSIE: SECRET PLESIOSAUR / LOCH NESS SEA-LEVIATHAN
+      // =====================================================
+      const fangMat = new THREE.MeshBasicMaterial({ color: '#f8fafc' });
+
+      // 3 Classic Loch Ness Sea-Serpent Humps emerging above the water + Bioluminescent Dorsal Fins!
+      const humpConfigs = [
+        { z: 0.75, radius: 0.92, y: 0.35 },
+        { z: -0.78, radius: 0.78, y: 0.25 },
+        { z: -2.1, radius: 0.62, y: 0.16 },
+      ];
+      for (const hc of humpConfigs) {
+        const hump = new THREE.Mesh(new THREE.DodecahedronGeometry(hc.radius * s, 0), bodyMat);
+        hump.scale.set(0.92, 0.85, 1.18);
+        hump.position.set(0, hc.y * s, hc.z * s);
+        const dorsalFin = new THREE.Mesh(new THREE.ConeGeometry(0.18 * s, 0.68 * s, 4), accentMat);
+        dorsalFin.scale.set(0.35, 1.0, 1.45);
+        dorsalFin.position.set(0, (hc.y + hc.radius * 0.85) * s, hc.z * s);
+        dorsalFin.rotation.x = -0.3;
+        rootGroup.add(hump, dorsalFin);
+      }
+
+      // Towering S-Curved Plesiosaur Neck rising 4.3 blocks high out of the water!
+      const neckSegments = [
+        { y: 0.82, z: 1.48, rx: 0.32, r: 0.44 },
+        { y: 1.48, z: 1.85, rx: 0.14, r: 0.38 },
+        { y: 2.18, z: 1.98, rx: -0.08, r: 0.33 },
+        { y: 2.86, z: 1.95, rx: -0.22, r: 0.29 },
+      ];
+      for (let nIdx = 0; nIdx < neckSegments.length; nIdx++) {
+        const ns = neckSegments[nIdx];
+        const neckMesh = new THREE.Mesh(new THREE.BoxGeometry(ns.r * 1.4 * s, 0.82 * s, ns.r * 1.5 * s), bodyMat);
+        neckMesh.position.set(0, ns.y * s, ns.z * s);
+        neckMesh.rotation.x = ns.rx;
+        const neckFrill = new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, 0.38 * s, 4), accentMat);
+        neckFrill.position.set(0, 0, -ns.r * 0.85 * s);
+        neckFrill.rotation.x = -Math.PI * 0.5;
+        neckMesh.add(neckFrill);
+        rootGroup.add(neckMesh);
+      }
+
+      // Prehistoric Plesiosaur / Sea-Dragon Head + Glowing Gold Eyes + Gill Frills + Sea-Fangs!
+      const head = new THREE.Group();
+      head.position.set(0, 3.38 * s, 2.15 * s);
+      const upperSkull = new THREE.Mesh(new THREE.BoxGeometry(0.56 * s, 0.38 * s, 0.98 * s), bodyMat);
+      upperSkull.position.set(0, 0.08 * s, 0.25 * s);
+      const lowerJaw = new THREE.Mesh(new THREE.BoxGeometry(0.46 * s, 0.18 * s, 0.86 * s), accentMat);
+      lowerJaw.position.set(0, -0.18 * s, 0.24 * s);
+      lowerJaw.rotation.x = 0.22;
+      const headCrest = new THREE.Mesh(new THREE.ConeGeometry(0.16 * s, 0.72 * s, 4), glowMat);
+      headCrest.position.set(0, 0.42 * s, -0.08 * s);
+      headCrest.rotation.x = -0.55;
+      head.add(upperSkull, lowerJaw, headCrest);
+
+      for (const side of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.12 * s, 0.14 * s), glowMat);
+        eye.position.set(side * 0.29 * s, 0.14 * s, 0.28 * s);
+        const gillFin = new THREE.Mesh(new THREE.ConeGeometry(0.14 * s, 0.55 * s, 4), accentMat);
+        gillFin.position.set(side * 0.38 * s, 0.06 * s, -0.1 * s);
+        gillFin.rotation.z = -side * 0.85;
+        gillFin.rotation.x = -0.4;
+        head.add(eye, gillFin);
+        for (let f = 0; f < 3; f++) {
+          const fang = new THREE.Mesh(new THREE.ConeGeometry(0.045 * s, 0.18 * s, 4), fangMat);
+          fang.rotation.x = Math.PI;
+          fang.position.set(side * 0.2 * s, -0.08 * s, (0.2 + f * 0.2) * s);
+          head.add(fang);
+        }
+      }
+      rootGroup.add(head);
+
+      // 4 Paddling Plesiosaur Flippers (Front = leftArm/rightArm, Rear = leftLeg/rightLeg)
+      leftArm.position.set(-0.82 * s, 0.15 * s, 0.85 * s);
+      rightArm.position.set(0.82 * s, 0.15 * s, 0.85 * s);
+      leftLeg.position.set(-0.68 * s, 0.12 * s, -1.15 * s);
+      rightLeg.position.set(0.68 * s, 0.12 * s, -1.15 * s);
+      [
+        { grp: leftArm, side: -1, len: 1.45 },
+        { grp: rightArm, side: 1, len: 1.45 },
+        { grp: leftLeg, side: -1, len: 1.15 },
+        { grp: rightLeg, side: 1, len: 1.15 },
+      ].forEach(({ grp, side, len }) => {
+        const flipper = new THREE.Mesh(new THREE.BoxGeometry(len * s, 0.12 * s, 0.52 * s), accentMat);
+        flipper.position.set(side * (len * 0.45) * s, -0.05 * s, -0.1 * s);
+        flipper.rotation.y = -side * 0.28;
+        grp.add(flipper);
+      });
+
+      // Swaying Finned Sea-Serpent Tail (stored in haloRing1 for smooth side-to-side animation!)
+      const tailGroup = new THREE.Group();
+      tailGroup.position.set(0, 0.15 * s, -2.55 * s);
+      const tailBody = new THREE.Mesh(new THREE.ConeGeometry(0.42 * s, 1.55 * s, 5), bodyMat);
+      tailBody.rotation.x = -Math.PI * 0.5;
+      tailBody.position.set(0, 0, -0.72 * s);
+      const tailFluke = new THREE.Mesh(new THREE.BoxGeometry(0.95 * s, 0.1 * s, 0.55 * s), accentMat);
+      tailFluke.position.set(0, 0.05 * s, -1.42 * s);
+      tailGroup.add(tailBody, tailFluke);
+      haloRing1 = tailGroup;
+
+      rootGroup.add(leftArm, rightArm, leftLeg, rightLeg, tailGroup);
     } else {
       // =====================================================
       // AETHELGARD: SIX-WINGED CELESTIAL SERAPH CONSTRUCT

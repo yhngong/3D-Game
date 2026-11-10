@@ -227,7 +227,8 @@ export interface BossDef {
   bodyColor: string;
   accentColor: string;
   glowColor: string;
-  modelType: 'treant_boss' | 'frost_boss' | 'molten_boss' | 'void_boss' | 'astral_boss';
+  modelType: 'treant_boss' | 'frost_boss' | 'molten_boss' | 'void_boss' | 'astral_boss' | 'nessie_boss';
+  isSecret?: boolean;
   phases: {
     hpThreshold: number; // e.g., 1.0, 0.65, 0.3
     name: string;

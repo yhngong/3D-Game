@@ -1203,6 +1203,53 @@ export class HudAndMenuManager {
       })
       .join('');
 
+    const nessie = BOSSES['boss_nessie'];
+    const nessieDefeated = nessie && this.player.defeatedBosses.has('boss_nessie');
+    const secretCardHtml = nessie
+      ? `
+        <div class="codex-card" style="border-left: 4px solid #2dd4bf">
+          <div class="codex-card-header">
+            <div>
+              <div class="codex-tier-title" style="color:#2dd4bf">
+                ${nessieDefeated || cheatsOn ? 'Secret Mythic Tier: Loch Depths' : '??? Secret Mythic Encounter ???'}
+              </div>
+              <div class="codex-tier-sub">
+                ${
+                  nessieDefeated || cheatsOn
+                    ? 'Awakened by the Crown of Aethelgard upon the Waters'
+                    : 'Whispers speak of the Crown of Aethelgard held toward open water...'
+                }
+              </div>
+            </div>
+            <div class="codex-actions">
+              ${
+                cheatsOn
+                  ? `<button class="codex-btn summon-btn" data-summon-boss="boss_nessie">Summon Nessie (Near Water)</button>`
+                  : `<span class="cheats-locked-pill">🌊 Hidden Secret</span>`
+              }
+            </div>
+          </div>
+          <div class="codex-boss-box">
+            <strong>
+              ${
+                nessieDefeated || cheatsOn
+                  ? `Secret Boss: ${nessie.name}, ${nessie.title} (${nessie.maxHp} HP)`
+                  : 'Secret Boss: ???'
+              }
+            </strong>
+            ${nessieDefeated ? `<span class="boss-defeated-tag">✓ VANQUISHED</span>` : ''}
+            <div class="codex-boss-lore">
+              ${
+                nessieDefeated || cheatsOn
+                  ? nessie.lore
+                  : 'Claim the Crown of Aethelgard and Right-Click while gazing upon a lake or river to discover this secret boss.'
+              }
+            </div>
+          </div>
+        </div>
+      `
+      : '';
+
     this.modalContent.innerHTML = `
       <div class="codex-wrap">
         <div class="codex-intro">
@@ -1226,7 +1273,7 @@ export class HudAndMenuManager {
               `
           }
         </div>
-        <div class="codex-grid">${cardsHtml}</div>
+        <div class="codex-grid">${cardsHtml}${secretCardHtml}</div>
       </div>
     `;
 

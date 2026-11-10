@@ -638,6 +638,75 @@ export class VoxelWorld {
     return null;
   }
 
+  /**
+   * Raycasts along the look vector to detect if the player is looking directly at Water.
+   * Stops early if obstructed by a solid block.
+   */
+  public raycastWater(origin: THREE.Vector3, direction: THREE.Vector3, maxDistance = 42): RaycastHit | null {
+    const dir = direction.clone().normalize();
+    let x = Math.floor(origin.x);
+    let y = Math.floor(origin.y);
+    let z = Math.floor(origin.z);
+
+    const stepX = dir.x > 0 ? 1 : -1;
+    const stepY = dir.y > 0 ? 1 : -1;
+    const stepZ = dir.z > 0 ? 1 : -1;
+
+    const tDeltaX = dir.x !== 0 ? Math.abs(1 / dir.x) : Infinity;
+    const tDeltaY = dir.y !== 0 ? Math.abs(1 / dir.y) : Infinity;
+    const tDeltaZ = dir.z !== 0 ? Math.abs(1 / dir.z) : Infinity;
+
+    let tMaxX = dir.x > 0 ? (x + 1 - origin.x) * tDeltaX : (origin.x - x) * tDeltaX;
+    let tMaxY = dir.y > 0 ? (y + 1 - origin.y) * tDeltaY : (origin.y - y) * tDeltaY;
+    let tMaxZ = dir.z > 0 ? (z + 1 - origin.z) * tDeltaZ : (origin.z - z) * tDeltaZ;
+
+    let dist = 0;
+    const normal = new THREE.Vector3(0, 1, 0);
+
+    while (dist <= maxDistance) {
+      const blockId = this.getBlock(x, y, z);
+      if (blockId === BlockId.Water) {
+        return {
+          blockId,
+          voxel: new THREE.Vector3(x, y, z),
+          normal,
+          distance: dist,
+        };
+      }
+      if (blockId !== BlockId.Air && BLOCKS[blockId]?.solid) {
+        return null;
+      }
+
+      if (tMaxX < tMaxY) {
+        if (tMaxX < tMaxZ) {
+          x += stepX;
+          dist = tMaxX;
+          tMaxX += tDeltaX;
+          normal.set(-stepX, 0, 0);
+        } else {
+          z += stepZ;
+          dist = tMaxZ;
+          tMaxZ += tDeltaZ;
+          normal.set(0, 0, -stepZ);
+        }
+      } else {
+        if (tMaxY < tMaxZ) {
+          y += stepY;
+          dist = tMaxY;
+          tMaxY += tDeltaY;
+          normal.set(0, -stepY, 0);
+        } else {
+          z += stepZ;
+          dist = tMaxZ;
+          tMaxZ += tDeltaZ;
+          normal.set(0, 0, -stepZ);
+        }
+      }
+    }
+
+    return null;
+  }
+
   private saveModifiedBlocks(): void {
     try {
       const entries: [string, number][] = [];

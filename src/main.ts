@@ -379,6 +379,37 @@ class AethelgardGame {
     const item = this.player.getSelectedItemDef();
     if (!item) return;
 
+    // SECRET BOSS SUMMON: Right-Clicking Water while holding the Crown of Aethelgard!
+    if (item.id === 'sovereign_crown_shard') {
+      const dir = new THREE.Vector3();
+      this.camera.getWorldDirection(dir);
+      const eyeOrigin = new THREE.Vector3(
+        this.player.position.x,
+        this.player.position.y + this.player.eyeHeight,
+        this.player.position.z
+      );
+      const waterHit = this.world.raycastWater(eyeOrigin, dir, 42);
+      if (waterHit) {
+        this.player.triggerSwing();
+        if (this.entities.summonBoss('boss_nessie', waterHit.voxel)) {
+          this.player.removeItem(item.id, 1);
+          this.ui.renderHotbar();
+          this.ui.showBanner(
+            '🦕 SECRET BOSS: NESSIE AWAKENS!',
+            'Projectiles deal 0 DMG to Nessie — dive into the water to fight the Leviathan!',
+            '#2dd4bf'
+          );
+        }
+      } else {
+        this.ui.showBanner(
+          '👑 THE CROWN RESONATES...',
+          'Look directly at Water and Right-Click with the Crown of Aethelgard to awaken what slumbers beneath!',
+          '#38bdf8'
+        );
+      }
+      return;
+    }
+
     if (item.summonsBossId) {
       if (this.entities.summonBoss(item.summonsBossId)) {
         this.player.removeItem(item.id, 1);
