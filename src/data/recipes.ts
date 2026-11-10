@@ -694,6 +694,88 @@ export const RECIPES: RecipeDef[] = [
       { itemId: 'void_crystal', count: 3 },
     ],
   },
+
+  // ========================
+  // TIER 1–6 CRAFTABLE FLYING MOUNTS ([R] TO FLY!)
+  // ========================
+  {
+    id: 'craft_mount_bramble_bee',
+    resultItemId: 'mount_bramble_bee',
+    resultCount: 1,
+    tier: 1,
+    category: 'mount',
+    station: 'Artisan Workbench',
+    ingredients: [
+      { itemId: 'block_oak_planks', count: 4 },
+      { itemId: 'living_vine', count: 2 },
+      { itemId: 'tough_hide', count: 2 },
+    ],
+  },
+  {
+    id: 'craft_mount_sylvan_owl',
+    resultItemId: 'mount_sylvan_owl',
+    resultCount: 1,
+    tier: 2,
+    category: 'mount',
+    station: 'Bronze Smeltery',
+    ingredients: [
+      { itemId: 'bronze_ingot', count: 4 },
+      { itemId: 'sylvan_essence', count: 4 },
+      { itemId: 'living_vine', count: 2 },
+    ],
+  },
+  {
+    id: 'craft_mount_frost_wyvern',
+    resultItemId: 'mount_frost_wyvern',
+    resultCount: 1,
+    tier: 3,
+    category: 'mount',
+    station: 'Frostforged Anvil',
+    ingredients: [
+      { itemId: 'mythril_ingot', count: 5 },
+      { itemId: 'cryo_shard', count: 6 },
+      { itemId: 'cryo_matrix', count: 1 },
+    ],
+  },
+  {
+    id: 'craft_mount_solar_phoenix',
+    resultItemId: 'mount_solar_phoenix',
+    resultCount: 1,
+    tier: 4,
+    category: 'mount',
+    station: 'Solar Pyroclast Forge',
+    ingredients: [
+      { itemId: 'pyroclast_ingot', count: 6 },
+      { itemId: 'solar_cinder', count: 6 },
+      { itemId: 'solar_core', count: 1 },
+    ],
+  },
+  {
+    id: 'craft_mount_void_saucer',
+    resultItemId: 'mount_void_saucer',
+    resultCount: 1,
+    tier: 5,
+    category: 'mount',
+    station: 'Astral Nexus Altar',
+    ingredients: [
+      { itemId: 'aetherium_ingot', count: 6 },
+      { itemId: 'void_crystal', count: 8 },
+      { itemId: 'astral_keystone', count: 1 },
+    ],
+  },
+  {
+    id: 'craft_mount_celestial_pegasus',
+    resultItemId: 'mount_celestial_pegasus',
+    resultCount: 1,
+    tier: 6,
+    category: 'mount',
+    station: 'Astral Nexus Altar',
+    ingredients: [
+      { itemId: 'starsteel_ingot', count: 8 },
+      { itemId: 'void_crystal', count: 4 },
+      { itemId: 'astral_nectar', count: 2 },
+    ],
+  },
 ];
 
 export const PROGRESSION_GUIDE: Record<

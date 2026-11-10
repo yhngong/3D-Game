@@ -46,6 +46,7 @@ export type ItemCategory =
   | 'ranged'
   | 'armor'
   | 'trinket'
+  | 'mount'
   | 'consumable'
   | 'boss_relic';
 
@@ -133,6 +134,11 @@ export interface ItemDef {
   // Boss summon & World totems
   summonsBossId?: string;
   totemEffect?: 'sundial' | 'tempest';
+  // Flying Mount properties (Terraria-style tiered mounts!)
+  mountFlySpeed?: number;
+  mountVerticalSpeed?: number;
+  mountHover?: boolean;
+  mountModelType?: 'bee' | 'owl' | 'wyvern' | 'phoenix' | 'ufo' | 'star_drake';
   // Visual icon colors
   primaryColor: string;
   secondaryColor: string;
@@ -157,7 +163,8 @@ export interface ItemDef {
     | 'rifle'
     | 'armor'
     | 'potion'
-    | 'totem';
+    | 'totem'
+    | 'mount';
 }
 
 export interface RecipeIngredient {

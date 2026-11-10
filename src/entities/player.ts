@@ -61,6 +61,8 @@ export class PlayerController {
   public selectedHotbarIndex = 0;
   public equippedArmorId: string | null = null;
   public equippedTrinketId: string | null = null;
+  public equippedMountId: string | null = null;
+  public isMounted = false;
 
   // Cooldowns & animations
   public attackCooldownTimer = 0;
@@ -85,6 +87,13 @@ export class PlayerController {
   private heroAccentMat!: THREE.MeshLambertMaterial;
   private lastHeroArmorId: string | null = '__init__';
 
+  // 3D Flying Mount Rig (visible beneath player while riding!)
+  public mountGroup: THREE.Group;
+  private mountLeftWing: THREE.Object3D | null = null;
+  private mountRightWing: THREE.Object3D | null = null;
+  private mountSpinRing: THREE.Object3D | null = null;
+  private lastBuiltMountId: string | null = '__init__';
+
   // First-person held item 3D rig
   public handGroup: THREE.Group;
   private heldMeshGroup: THREE.Group;
@@ -105,6 +114,10 @@ export class PlayerController {
     this.heroGroup = new THREE.Group();
     this.buildThirdPersonHeroMesh();
     this.world.scene.add(this.heroGroup);
+
+    this.mountGroup = new THREE.Group();
+    this.mountGroup.visible = false;
+    this.world.scene.add(this.mountGroup);
 
     this.initStarterInventory();
     this.loadPlayerState();
@@ -193,6 +206,48 @@ export class PlayerController {
     this.inventory[8] = { itemId: 'tempest_totem', count: 2 };
     this.equippedArmorId = 'bramble_armor';
     this.equippedTrinketId = null;
+    this.equippedMountId = null;
+    this.isMounted = false;
+    if (this.mountGroup) this.mountGroup.visible = false;
+  }
+
+  public toggleMount(): { mounted: boolean; mountDef: ItemDef | null } {
+    const mountDef = this.equippedMountId ? ITEMS[this.equippedMountId] || null : null;
+    if (!mountDef) {
+      this.isMounted = false;
+      this.mountGroup.visible = false;
+      return { mounted: false, mountDef: null };
+    }
+    this.isMounted = !this.isMounted;
+    this.mountGroup.visible = this.isMounted;
+    if (this.isMounted) {
+      this.velocity.y = Math.max(this.velocity.y, 5.2);
+      this.onGround = false;
+      this.unlockAchievement('sky_rider');
+      sound.playMagicCast(1.2);
+    } else {
+      sound.playPickup();
+    }
+    return { mounted: this.isMounted, mountDef };
+  }
+
+  public equipAndRideMountFromSlot(slotIndex: number): ItemDef | null {
+    const slot = this.inventory[slotIndex];
+    if (!slot) return null;
+    const def = ITEMS[slot.itemId];
+    if (!def || def.category !== 'mount') return null;
+
+    const prevMount = this.equippedMountId;
+    this.equippedMountId = def.id;
+    this.inventory[slotIndex] = prevMount ? { itemId: prevMount, count: 1 } : null;
+    this.isMounted = true;
+    this.mountGroup.visible = true;
+    this.velocity.y = Math.max(this.velocity.y, 5.2);
+    this.onGround = false;
+    this.unlockAchievement('sky_rider');
+    sound.playMagicCast(1.2);
+    this.savePlayerState();
+    return def;
   }
 
   public getSelectedSlot(): InventorySlot | null {
@@ -529,6 +584,12 @@ export class PlayerController {
       this.recalculateStats();
       this.hp = this.maxHp;
       this.mana = this.maxMana;
+    } else if (resultDef && resultDef.category === 'mount') {
+      if (this.equippedMountId) {
+        this.addItem(this.equippedMountId, 1);
+      }
+      this.equippedMountId = recipe.resultItemId;
+      this.unlockAchievement('sky_rider');
     } else {
       this.addItem(recipe.resultItemId, recipe.resultCount);
     }
@@ -639,7 +700,12 @@ export class PlayerController {
       this.takeDamage(10);
     }
 
-    // Horizontal Movement
+    const mount = this.isMounted && this.equippedMountId ? ITEMS[this.equippedMountId] : null;
+    if (this.isMounted && !mount) {
+      this.isMounted = false;
+    }
+
+    // Horizontal Movement (Ground vs Tiered Flying Mount!)
     const moveDir = new THREE.Vector3();
     if (this.keys['KeyW'] || this.keys['ArrowUp']) moveDir.z -= 1;
     if (this.keys['KeyS'] || this.keys['ArrowDown']) moveDir.z += 1;
@@ -651,36 +717,62 @@ export class PlayerController {
       moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
     }
 
-    const baseSpeed = (this.keys['ShiftLeft'] ? 7.4 : 5.5) * speedMult;
-    const targetVx = moveDir.x * baseSpeed;
-    const targetVz = moveDir.z * baseSpeed;
+    if (mount) {
+      // Terraria-style Tiered Flying Mount Physics!
+      const mountSpeed = (mount.mountFlySpeed || 10) * (this.keys['ShiftLeft'] ? 1.2 : 1.0);
+      const targetVx = moveDir.x * mountSpeed;
+      const targetVz = moveDir.z * mountSpeed;
+      const flyAccel = this.dashActiveTimer > 0 ? 2.5 : 10.5;
+      this.velocity.x += (targetVx - this.velocity.x) * Math.min(1, flyAccel * dt);
+      this.velocity.z += (targetVz - this.velocity.z) * Math.min(1, flyAccel * dt);
 
-    // Preserve high dash momentum while dashActiveTimer > 0 so the dash launches you much further!
-    const accel = this.dashActiveTimer > 0 ? 1.8 : this.onGround ? 18 : 8;
-    this.velocity.x += (targetVx - this.velocity.x) * Math.min(1, accel * dt);
-    this.velocity.z += (targetVz - this.velocity.z) * Math.min(1, accel * dt);
-
-    // Gravity & Gliding
-    if (this.inWater) {
-      this.velocity.y -= 9.0 * dt;
+      const vertSpeed = mount.mountVerticalSpeed || 8.0;
+      let targetVy = mount.mountHover ? 0 : -1.5; // Tier 1 Bee slowly glides down unless buzzing up; Tier 2-6 hover!
       if (this.keys['Space']) {
-        this.velocity.y = 5.5;
+        targetVy = vertSpeed;
+      } else if (this.keys['KeyC'] || this.keys['ControlLeft']) {
+        targetVy = -vertSpeed;
       }
+      this.velocity.y += (targetVy - this.velocity.y) * Math.min(1, 11 * dt);
     } else {
-      let gravity = 24.0;
-      if (armor?.allowGlide && this.keys['Space'] && this.velocity.y < -2.0) {
-        gravity = 4.5;
-        this.velocity.y = Math.max(this.velocity.y, -3.2);
+      const baseSpeed = (this.keys['ShiftLeft'] ? 7.4 : 5.5) * speedMult;
+      const targetVx = moveDir.x * baseSpeed;
+      const targetVz = moveDir.z * baseSpeed;
+
+      // Preserve high dash momentum while dashActiveTimer > 0 so the dash launches you much further!
+      const accel = this.dashActiveTimer > 0 ? 1.8 : this.onGround ? 18 : 8;
+      this.velocity.x += (targetVx - this.velocity.x) * Math.min(1, accel * dt);
+      this.velocity.z += (targetVz - this.velocity.z) * Math.min(1, accel * dt);
+
+      // Gravity & Gliding
+      if (this.inWater) {
+        this.velocity.y -= 9.0 * dt;
+        if (this.keys['Space']) {
+          this.velocity.y = 5.5;
+        }
+      } else {
+        let gravity = 24.0;
+        if (armor?.allowGlide && this.keys['Space'] && this.velocity.y < -2.0) {
+          gravity = 4.5;
+          this.velocity.y = Math.max(this.velocity.y, -3.2);
+        }
+        this.velocity.y -= gravity * dt;
       }
-      this.velocity.y -= gravity * dt;
     }
 
     // Apply swept AABB collision per axis
     this.moveWithCollision(dt);
+    if (this.position.y > 62) {
+      this.position.y = 62;
+      this.velocity.y = Math.min(0, this.velocity.y);
+    }
 
     if (this.onGround) {
       this.jumpsRemaining = armor?.allowDoubleJump ? (armor.tier >= 6 ? 3 : 2) : 1;
     }
+
+    // Update 3D Flying Mount Visual Rig
+    this.updateMountModel(dt, mount, moveDir.lengthSq() > 0);
 
     // Update Camera Transform (1st person vs 3rd person orbit)
     const euler = new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ');
@@ -688,20 +780,198 @@ export class PlayerController {
 
     if (this.isThirdPerson) {
       const lookBack = new THREE.Vector3(0, 0, 1).applyEuler(euler);
-      const camDist = 4.2;
+      const camDist = mount ? 5.2 : 4.2;
       const targetCamPos = new THREE.Vector3(
         this.position.x + lookBack.x * camDist,
         this.position.y + this.eyeHeight + 0.45 + lookBack.y * camDist * 0.6,
         this.position.z + lookBack.z * camDist
       );
       this.camera.position.copy(targetCamPos);
-      this.updateThirdPersonHeroModel(moveDir.lengthSq() > 0);
+      this.updateThirdPersonHeroModel(moveDir.lengthSq() > 0 && !mount);
     } else {
       this.camera.position.set(this.position.x, this.position.y + this.eyeHeight, this.position.z);
     }
 
     // Update Held Item 3D Model & Animation
-    this.updateHeldItemModel(dt, moveDir.lengthSq() > 0);
+    this.updateHeldItemModel(dt, moveDir.lengthSq() > 0 && !mount);
+  }
+
+  private updateMountModel(dt: number, mountDef: ItemDef | null, isMoving: boolean): void {
+    if (!mountDef || !this.isMounted) {
+      this.mountGroup.visible = false;
+      return;
+    }
+    this.mountGroup.visible = true;
+
+    if (this.lastBuiltMountId !== mountDef.id) {
+      this.lastBuiltMountId = mountDef.id;
+      this.rebuildMountMesh(mountDef);
+    }
+
+    const nowSec = performance.now() * 0.001;
+    const hoverBob = Math.sin(nowSec * 4.5) * 0.07;
+    this.mountGroup.position.set(this.position.x, this.position.y - 0.12 + hoverBob, this.position.z);
+    this.mountGroup.rotation.y = this.yaw;
+    this.mountGroup.rotation.x = isMoving ? -0.08 : 0;
+
+    if (this.mountLeftWing && this.mountRightWing) {
+      const flapFreq = mountDef.mountModelType === 'bee' ? 28 : 9.5;
+      const flapAmp = mountDef.mountModelType === 'bee' ? 0.48 : 0.55;
+      const flap = Math.sin(nowSec * flapFreq) * flapAmp;
+      this.mountLeftWing.rotation.z = flap;
+      this.mountRightWing.rotation.z = -flap;
+    }
+    if (this.mountSpinRing) {
+      this.mountSpinRing.rotation.y += dt * 3.8;
+    }
+  }
+
+  private rebuildMountMesh(def: ItemDef): void {
+    while (this.mountGroup.children.length > 0) {
+      this.mountGroup.remove(this.mountGroup.children[0]);
+    }
+    this.mountLeftWing = null;
+    this.mountRightWing = null;
+    this.mountSpinRing = null;
+
+    const pMat = new THREE.MeshLambertMaterial({
+      color: def.primaryColor,
+      emissive: def.primaryColor,
+      emissiveIntensity: 0.28,
+    });
+    const sMat = new THREE.MeshLambertMaterial({
+      color: def.secondaryColor,
+      emissive: def.secondaryColor,
+      emissiveIntensity: 0.25,
+    });
+    const darkMat = new THREE.MeshLambertMaterial({ color: '#1e293b' });
+    const glowMat = new THREE.MeshBasicMaterial({ color: def.secondaryColor });
+
+    // Note: Player faces -Z when yaw = 0, so Mount front/head faces -Z!
+    if (def.mountModelType === 'ufo') {
+      // Tier 5: Aetherium Rift-Saucer UFO!
+      const saucerHull = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.45, 0.28, 16), pMat);
+      saucerHull.position.y = 0.22;
+      const cockpitRim = new THREE.Mesh(new THREE.TorusGeometry(0.68, 0.08, 8, 18), glowMat);
+      cockpitRim.rotation.x = Math.PI / 2;
+      cockpitRim.position.y = 0.42;
+      const tractorCore = new THREE.Mesh(
+        new THREE.ConeGeometry(0.75, 0.55, 12),
+        new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.45 })
+      );
+      tractorCore.position.y = -0.15;
+
+      const spinRing = new THREE.Group();
+      spinRing.position.y = 0.22;
+      const outerTorus = new THREE.Mesh(new THREE.TorusGeometry(1.52, 0.09, 8, 24), glowMat);
+      outerTorus.rotation.x = Math.PI / 2;
+      spinRing.add(outerTorus);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), glowMat);
+        orb.position.set(Math.cos(a) * 1.52, 0, Math.sin(a) * 1.52);
+        spinRing.add(orb);
+      }
+      this.mountSpinRing = spinRing;
+      this.mountGroup.add(saucerHull, cockpitRim, tractorCore, spinRing);
+      return;
+    }
+
+    if (def.mountModelType === 'bee') {
+      // Tier 1: Giant Striped Bramble Honey-Hornet!
+      const thorax = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.65, 1.45), pMat);
+      thorax.position.set(0, 0.35, 0.15);
+      const stripe1 = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.68, 0.26), sMat);
+      stripe1.position.set(0, 0.35, 0.05);
+      const stripe2 = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.68, 0.26), sMat);
+      stripe2.position.set(0, 0.35, 0.52);
+      const stinger = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.48, 4), darkMat);
+      stinger.rotation.x = Math.PI / 2;
+      stinger.position.set(0, 0.32, 1.08);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.48, 0.48), sMat);
+      head.position.set(0, 0.42, -0.75);
+      this.mountGroup.add(thorax, stripe1, stripe2, stinger, head);
+
+      const wingMat = new THREE.MeshBasicMaterial({
+        color: '#e0f2fe',
+        transparent: true,
+        opacity: 0.72,
+        side: THREE.DoubleSide,
+      });
+      const lWing = new THREE.Group();
+      lWing.position.set(-0.42, 0.68, 0.0);
+      const lwMesh = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.04, 0.52), wingMat);
+      lwMesh.position.x = -0.55;
+      lWing.add(lwMesh);
+
+      const rWing = new THREE.Group();
+      rWing.position.set(0.42, 0.68, 0.0);
+      const rwMesh = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.04, 0.52), wingMat);
+      rwMesh.position.x = 0.55;
+      rWing.add(rwMesh);
+
+      this.mountLeftWing = lWing;
+      this.mountRightWing = rWing;
+      this.mountGroup.add(lWing, rWing);
+      return;
+    }
+
+    // Winged Beasts & Dragons: Owl (T2), Frost Sky-Drake (T3), Solar Phoenix (T4), Starsteel Leviathan (T6)
+    const isDragon = def.mountModelType === 'wyvern' || def.mountModelType === 'star_drake';
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.62, 1.85), pMat);
+    body.position.set(0, 0.34, 0.1);
+    const saddle = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.16, 0.68), darkMat);
+    saddle.position.set(0, 0.68, 0.05);
+    const neck = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.58, 0.52), pMat);
+    neck.position.set(0, 0.68, -0.95);
+    neck.rotation.x = 0.35;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.44, 0.68), pMat);
+    head.position.set(0, 0.96, -1.35);
+    const beakOrHorns = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.52, 4), glowMat);
+    beakOrHorns.rotation.x = -Math.PI / 2;
+    beakOrHorns.position.set(0, 0.92, -1.82);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.36, 1.35, 4), sMat);
+    tail.rotation.x = Math.PI / 2;
+    tail.position.set(0, 0.36, 1.55);
+    this.mountGroup.add(body, saddle, neck, head, beakOrHorns, tail);
+
+    const wingSpan = def.mountModelType === 'star_drake' ? 2.15 : isDragon ? 1.85 : 1.55;
+    const lWing = new THREE.Group();
+    lWing.position.set(-0.45, 0.56, -0.05);
+    const lwMain = new THREE.Mesh(new THREE.BoxGeometry(wingSpan, 0.07, 0.82), pMat);
+    lwMain.position.x = -wingSpan * 0.5;
+    const lwTrim = new THREE.Mesh(new THREE.BoxGeometry(wingSpan * 0.85, 0.09, 0.22), glowMat);
+    lwTrim.position.set(-wingSpan * 0.45, 0.02, -0.35);
+    lWing.add(lwMain, lwTrim);
+
+    const rWing = new THREE.Group();
+    rWing.position.set(0.45, 0.56, -0.05);
+    const rwMain = new THREE.Mesh(new THREE.BoxGeometry(wingSpan, 0.07, 0.82), pMat);
+    rwMain.position.x = wingSpan * 0.5;
+    const rwTrim = new THREE.Mesh(new THREE.BoxGeometry(wingSpan * 0.85, 0.09, 0.22), glowMat);
+    rwTrim.position.set(wingSpan * 0.45, 0.02, -0.35);
+    rWing.add(rwMain, rwTrim);
+
+    if (def.mountModelType === 'star_drake') {
+      // Secondary Starlight Wing Pair + Spinning Celestial Engine Halo!
+      const subL = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.06, 0.42), glowMat);
+      subL.position.set(-0.75, -0.18, 0.45);
+      subL.rotation.z = -0.22;
+      lWing.add(subL);
+      const subR = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.06, 0.42), glowMat);
+      subR.position.set(0.75, -0.18, 0.45);
+      subR.rotation.z = 0.22;
+      rWing.add(subR);
+
+      const engineHalo = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.06, 6, 20), glowMat);
+      engineHalo.position.set(0, 0.45, 0.95);
+      this.mountSpinRing = engineHalo;
+      this.mountGroup.add(engineHalo);
+    }
+
+    this.mountLeftWing = lWing;
+    this.mountRightWing = rWing;
+    this.mountGroup.add(lWing, rWing);
   }
 
   private updateThirdPersonHeroModel(isMoving: boolean): void {
@@ -731,6 +1001,7 @@ export class PlayerController {
   }
 
   public handleJumpKeyPress(): void {
+    if (this.isMounted) return; // Space smoothly ascends while riding a Flying Mount!
     if (this.inWater) {
       this.velocity.y = 6.2;
       return;
@@ -1299,6 +1570,8 @@ export class PlayerController {
         this.equippedArmorId = def.id;
       } else if (def.category === 'trinket') {
         this.equippedTrinketId = def.id;
+      } else if (def.category === 'mount') {
+        this.equippedMountId = def.id;
       } else if (def.category === 'boss_relic') {
         this.addItem(def.id, 2);
       } else if (def.category === 'melee' || def.category === 'ranged' || def.category === 'tool') {
@@ -1359,6 +1632,7 @@ export class PlayerController {
         inventory: this.inventory,
         equippedArmorId: this.equippedArmorId,
         equippedTrinketId: this.equippedTrinketId,
+        equippedMountId: this.equippedMountId,
         unlockedTier: this.unlockedTier,
         defeatedBosses: Array.from(this.defeatedBosses),
         level: this.level,
@@ -1404,6 +1678,9 @@ export class PlayerController {
       }
       if (state.equippedTrinketId) {
         this.equippedTrinketId = state.equippedTrinketId;
+      }
+      if (state.equippedMountId) {
+        this.equippedMountId = state.equippedMountId;
       }
       if (state.unlockedTier) {
         this.unlockedTier = state.unlockedTier;

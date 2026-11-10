@@ -37,6 +37,7 @@ export class HudAndMenuManager {
   private manaTextEl!: HTMLElement;
   private armorBadgeEl!: HTMLElement;
   private trinketBadgeEl!: HTMLElement;
+  private mountBadgeEl!: HTMLElement;
   private dashBadgeEl!: HTMLElement;
   private daylightBadgeEl!: HTMLElement;
 
@@ -156,6 +157,7 @@ export class HudAndMenuManager {
         <div class="badges-row">
           <span id="armor-badge" class="hud-badge">🛡️ DEF: 12%</span>
           <span id="trinket-badge" class="hud-badge">💍 No Trinket</span>
+          <span id="mount-badge" class="hud-badge">🦅 [R] No Mount</span>
           <span id="dash-badge" class="hud-badge dash-ready">⚡ [Q] Dash</span>
           <span id="daylight-badge" class="hud-badge">☀️ Day (Safe)</span>
         </div>
@@ -189,6 +191,7 @@ export class HudAndMenuManager {
         </div>
         <div class="tracker-keys">
           <span><kbd>E</kbd> Forge & Bag</span>
+          <span><kbd>R</kbd> Mount</span>
           <span><kbd>K</kbd> Skills</span>
           <span><kbd>X</kbd> Dispose Item</span>
           <span><kbd>B</kbd> Recall</span>
@@ -211,9 +214,9 @@ export class HudAndMenuManager {
         <div class="bottom-quick-bar">
           <span><kbd>LMB</kbd> Attack / Mine</span>
           <span><kbd>RMB</kbd> Ability / Place / Use</span>
-          <span><kbd>X</kbd> Dispose Held Item (+XP)</span>
-          <span><kbd>Shift+X</kbd> Dispose Stack</span>
+          <span><kbd>R</kbd> Toggle Mount (<kbd>Space</kbd>/<kbd>C</kbd> Fly)</span>
           <span><kbd>Q</kbd> Dash</span>
+          <span><kbd>X</kbd> Dispose Item</span>
         </div>
       </div>
 
@@ -247,6 +250,7 @@ export class HudAndMenuManager {
     this.manaTextEl = document.getElementById('mana-text')!;
     this.armorBadgeEl = document.getElementById('armor-badge')!;
     this.trinketBadgeEl = document.getElementById('trinket-badge')!;
+    this.mountBadgeEl = document.getElementById('mount-badge')!;
     this.dashBadgeEl = document.getElementById('dash-badge')!;
     this.daylightBadgeEl = document.getElementById('daylight-badge')!;
 
@@ -484,6 +488,18 @@ export class HudAndMenuManager {
 
     const trinketDef = this.player.equippedTrinketId ? ITEMS[this.player.equippedTrinketId] : null;
     this.trinketBadgeEl.textContent = trinketDef ? `💍 ${trinketDef.name.split(' ')[0]}` : '💍 No Trinket';
+
+    const mountDef = this.player.equippedMountId ? ITEMS[this.player.equippedMountId] : null;
+    if (mountDef && this.player.isMounted) {
+      this.mountBadgeEl.textContent = `🦅 [R] Riding: ${mountDef.name.split(' ')[0]} (${mountDef.mountFlySpeed}m/s)`;
+      this.mountBadgeEl.className = 'hud-badge dash-ready';
+    } else if (mountDef) {
+      this.mountBadgeEl.textContent = `🦅 [R] Mount: ${mountDef.name.split(' ')[0]}`;
+      this.mountBadgeEl.className = 'hud-badge';
+    } else {
+      this.mountBadgeEl.textContent = '🦅 [R] No Mount';
+      this.mountBadgeEl.className = 'hud-badge';
+    }
 
     if (this.player.dashCooldownTimer <= 0) {
       this.dashBadgeEl.textContent = '⚡ [Q] Dash: READY';
@@ -839,6 +855,8 @@ export class HudAndMenuManager {
 
     const trinketDef = this.player.equippedTrinketId ? ITEMS[this.player.equippedTrinketId] : null;
     const trinketIcon = this.player.equippedTrinketId ? this.atlas.getItemIconDataUrl(this.player.equippedTrinketId) : '';
+    const mountDef = this.player.equippedMountId ? ITEMS[this.player.equippedMountId] : null;
+    const mountIcon = this.player.equippedMountId ? this.atlas.getItemIconDataUrl(this.player.equippedMountId) : '';
 
     const activeSlot = this.player.getSelectedSlot();
     const activeItemDef = this.player.getSelectedItemDef();
@@ -869,6 +887,7 @@ export class HudAndMenuManager {
               <option value="melee" ${this.selectedCraftCategory === 'melee' ? 'selected' : ''}>⚔️ Melee Weapons</option>
               <option value="ranged" ${this.selectedCraftCategory === 'ranged' ? 'selected' : ''}>🏹 Ranged & Magic</option>
               <option value="armor" ${this.selectedCraftCategory === 'armor' ? 'selected' : ''}>🛡️ Armor Sets</option>
+              <option value="mount" ${this.selectedCraftCategory === 'mount' ? 'selected' : ''}>🦅 Flying Mounts [R]</option>
               <option value="trinket" ${this.selectedCraftCategory === 'trinket' ? 'selected' : ''}>💍 Mythic Trinkets</option>
               <option value="tool" ${this.selectedCraftCategory === 'tool' ? 'selected' : ''}>⛏️ Pickaxes & Axes</option>
               <option value="boss_relic" ${this.selectedCraftCategory === 'boss_relic' ? 'selected' : ''}>💀 Boss Summon Relics</option>
@@ -896,6 +915,22 @@ export class HudAndMenuManager {
                 <div class="armor-box-title">Trinket: ${trinketDef ? trinketDef.name : 'None Equipped'}</div>
                 <div class="armor-box-bonus">${trinketDef?.setBonusText || 'Craft a Mythic Trinket for Damage, Speed & Regen!'}</div>
               </div>
+            </div>
+            <div class="equipped-armor-box" style="border-color:rgba(56,189,248,0.45); grid-column: 1 / -1;">
+              ${mountIcon ? `<img src="${mountIcon}" class="armor-box-icon" />` : `<div class="empty-equip-icon">🦅</div>`}
+              <div style="flex:1;">
+                <div class="armor-box-title">Flying Mount [R]: ${mountDef ? mountDef.name : 'None Equipped'}</div>
+                <div class="armor-box-bonus">${
+                  mountDef?.setBonusText || 'Craft a Tier 1–6 Flying Mount (Hornet → Owl → Sky-Drake → Phoenix → UFO → Star-Cruiser)!'
+                }</div>
+              </div>
+              ${
+                mountDef
+                  ? `<button id="modal-toggle-mount-btn" type="button" class="craft-btn ready" style="padding:6px 12px;">
+                      ${this.player.isMounted ? 'Dismount [R]' : 'Ride Mount [R]'}
+                    </button>`
+                  : ''
+              }
             </div>
           </div>
 
@@ -983,6 +1018,14 @@ export class HudAndMenuManager {
       this.renderCraftingAndInventoryTab();
     });
 
+    const modalMountBtn = document.getElementById('modal-toggle-mount-btn');
+    if (modalMountBtn) {
+      modalMountBtn.addEventListener('click', () => {
+        this.player.toggleMount();
+        this.renderCraftingAndInventoryTab();
+      });
+    }
+
     this.modalContent.querySelectorAll('.craft-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const recipeId = (btn as HTMLElement).dataset.recipeId!;
@@ -1038,6 +1081,12 @@ export class HudAndMenuManager {
             this.player.inventory[idx] = prevTrinket ? { itemId: prevTrinket, count: 1 } : null;
             this.player.recalculateStats();
             sound.playPickup();
+            this.renderHotbar();
+            this.renderCraftingAndInventoryTab();
+            return;
+          }
+          if (def.category === 'mount') {
+            this.player.equipAndRideMountFromSlot(idx);
             this.renderHotbar();
             this.renderCraftingAndInventoryTab();
             return;

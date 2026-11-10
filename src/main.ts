@@ -255,6 +255,26 @@ class AethelgardGame {
       if (e.code === 'Space') {
         this.player.handleJumpKeyPress();
       }
+      if (e.code === 'KeyR') {
+        const res = this.player.toggleMount();
+        if (!res.mountDef) {
+          this.ui.showBanner(
+            '🦅 NO FLYING MOUNT EQUIPPED',
+            'Open the Forge [E] → Flying Mounts to craft a Bramble Hornet, Owl, Sky-Drake, Phoenix, UFO, or Star-Cruiser!',
+            '#f59e0b'
+          );
+        } else if (res.mounted) {
+          const pPos = this.player.position.clone().add(new THREE.Vector3(0, 0.5, 0));
+          this.entities.spawnParticles(pPos, res.mountDef.primaryColor, 20, 5.5);
+          this.ui.showBanner(
+            `🦅 MOUNTED: ${res.mountDef.name.toUpperCase()}`,
+            `Fly Speed: ${res.mountDef.mountFlySpeed} m/s • Hold [Space] to Fly Up, [C] to Descend, [R] to Dismount!`,
+            res.mountDef.primaryColor
+          );
+        } else {
+          this.ui.showBanner('🦅 DISMOUNTED', 'Press [R] anytime to summon your Flying Mount again.', '#94a3b8');
+        }
+      }
       if (e.code === 'KeyQ') {
         if (this.player.triggerDash()) {
           const burstPos = this.player.position.clone().add(new THREE.Vector3(0, 0.9, 0));
@@ -344,6 +364,19 @@ class AethelgardGame {
     const item = this.player.getSelectedItemDef();
     this.player.triggerSwing();
 
+    if (item && item.category === 'mount') {
+      const mountedDef = this.player.equipAndRideMountFromSlot(this.player.selectedHotbarIndex);
+      if (mountedDef) {
+        this.ui.renderHotbar();
+        this.ui.showBanner(
+          `🦅 EQUIPPED & MOUNTED: ${mountedDef.name.toUpperCase()}`,
+          'Hold [Space] to Fly Up, [C] to Descend, and press [R] anytime to toggle your Mount!',
+          mountedDef.primaryColor
+        );
+      }
+      return;
+    }
+
     if (item && item.summonsBossId) {
       if (this.entities.summonBoss(item.summonsBossId)) {
         this.player.removeItem(item.id, 1);
@@ -405,6 +438,19 @@ class AethelgardGame {
           '👑 THE CROWN RESONATES...',
           'Look directly at Water and Right-Click with the Crown of Aethelgard to awaken what slumbers beneath!',
           '#38bdf8'
+        );
+      }
+      return;
+    }
+
+    if (item.category === 'mount') {
+      const mountedDef = this.player.equipAndRideMountFromSlot(this.player.selectedHotbarIndex);
+      if (mountedDef) {
+        this.ui.renderHotbar();
+        this.ui.showBanner(
+          `🦅 EQUIPPED & MOUNTED: ${mountedDef.name.toUpperCase()}`,
+          'Hold [Space] to Fly Up, [C] to Descend, and press [R] anytime to toggle your Mount!',
+          mountedDef.primaryColor
         );
       }
       return;
@@ -774,6 +820,17 @@ class AethelgardGame {
           this.entities.spawnParticles(trailPos, '#38bdf8', 3, 2.8);
           this.entities.spawnParticles(trailPos, '#c084fc', 2, 2.4);
           this.entities.spawnParticles(trailPos, '#fde047', 1, 2.0);
+        }
+        if (this.player.isMounted && this.player.equippedMountId && Math.random() < dt * 14) {
+          const mDef = ITEMS[this.player.equippedMountId];
+          if (mDef) {
+            this.entities.spawnParticles(
+              this.player.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.9, 0.1, (Math.random() - 0.5) * 0.9)),
+              mDef.primaryColor,
+              1,
+              2.2
+            );
+          }
         }
         this.world.updateChunksAroundPlayer(this.player.position.x, this.player.position.z, 3);
         const { isNightTime, secondsRemaining, isRaining } = this.updateAtmosphere(dt);

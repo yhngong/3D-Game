@@ -931,6 +931,106 @@ export class TextureAtlasManager {
         ctx.strokeRect(16, 12, 16, 30);
         break;
       }
+
+      case 'mount': {
+        if (item.mountModelType === 'bee') {
+          // Tier 1: Striped Bramble Honey-Hornet Mount Icon
+          ctx.fillStyle = 'rgba(224, 242, 254, 0.88)';
+          ctx.beginPath();
+          ctx.ellipse(20, 13, 9, 5, -0.45, 0, Math.PI * 2);
+          ctx.ellipse(29, 14, 8, 4.5, 0.45, 0, Math.PI * 2);
+          ctx.fill();
+          // Striped bee body + stinger
+          ctx.fillStyle = '#facc15';
+          ctx.beginPath();
+          ctx.ellipse(24, 27, 14, 9, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#451a03';
+          ctx.fillRect(17, 19, 4, 16);
+          ctx.fillRect(25, 19, 4, 16);
+          ctx.beginPath();
+          ctx.moveTo(10, 27);
+          ctx.lineTo(3, 27);
+          ctx.lineTo(10, 30);
+          ctx.fill();
+          ctx.fillStyle = '#fef08a';
+          ctx.fillRect(33, 24, 3, 3);
+          break;
+        }
+
+        if (item.mountModelType === 'ufo') {
+          // Tier 5: Aetherium Rift-Saucer UFO Icon (Cosmic Car Key style!)
+          // Tractor beam glow underneath
+          ctx.fillStyle = 'rgba(56, 189, 248, 0.35)';
+          ctx.beginPath();
+          ctx.moveTo(16, 30);
+          ctx.lineTo(32, 30);
+          ctx.lineTo(38, 43);
+          ctx.lineTo(10, 43);
+          ctx.closePath();
+          ctx.fill();
+
+          // Glowing glass dome cockpit
+          ctx.fillStyle = '#38bdf8';
+          ctx.beginPath();
+          ctx.arc(24, 22, 10, Math.PI, 0);
+          ctx.fill();
+          ctx.strokeStyle = '#e0f2fe';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Metallic Aetherium Saucer Rim + Lights
+          ctx.fillStyle = '#9333ea';
+          ctx.beginPath();
+          ctx.ellipse(24, 25, 19, 6, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#f0abfc';
+          ctx.lineWidth = 1.8;
+          ctx.stroke();
+
+          ctx.fillStyle = '#fde047';
+          for (const lx of [11, 19, 29, 37]) {
+            ctx.beginPath();
+            ctx.arc(lx, 25, 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+        }
+
+        // Winged Mounts: Owl (T2), Frost Sky-Drake (T3), Solar Phoenix (T4), Starsteel Leviathan (T6)
+        ctx.fillStyle = p;
+        ctx.beginPath();
+        ctx.moveTo(24, 24);
+        ctx.lineTo(4, 10);
+        ctx.lineTo(7, 25);
+        ctx.lineTo(14, 31);
+        ctx.lineTo(24, 41);
+        ctx.lineTo(34, 31);
+        ctx.lineTo(41, 25);
+        ctx.lineTo(44, 10);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = s;
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+
+        // Mount Head & Glowing Saddle Core
+        ctx.fillStyle = s;
+        ctx.beginPath();
+        ctx.arc(24, 15, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(21, 14, 2, 2);
+        ctx.fillRect(25, 14, 2, 2);
+        if (item.mountModelType === 'star_drake') {
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.arc(24, 24, 16, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        break;
+      }
     }
 
     ctx.restore();
