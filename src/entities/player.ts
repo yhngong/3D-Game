@@ -1042,15 +1042,83 @@ export class PlayerController {
     }
 
     if (item.iconShape === 'totem') {
-      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.36, 0.11), handleMat);
-      pillar.position.set(0, 0.14, 0);
-      const wings = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.07, 0.05), primaryMat);
-      wings.position.set(0, 0.22, 0);
-      const crest = new THREE.Mesh(new THREE.OctahedronGeometry(0.1, 0), glowMat);
-      crest.position.set(0, 0.38, 0);
-      const halo = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.018, 6, 16), secondaryMat);
-      halo.position.set(0, 0.38, 0);
-      this.heldMeshGroup.add(pillar, wings, crest, halo);
+      if (item.id === 'tempest_totem') {
+        // Unique 3D Carved Storm-Thunderbird Totem Pole!
+        const slateMat = new THREE.MeshLambertMaterial({ color: '#475569' });
+        const stormCloudMat = new THREE.MeshLambertMaterial({ color: '#1e293b' });
+        const boltMat = new THREE.MeshBasicMaterial({ color: '#fde047' });
+        const cyanEyeMat = new THREE.MeshBasicMaterial({ color: '#7dd3fc' });
+
+        const basePedestal = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.16), stormCloudMat);
+        basePedestal.position.set(0, -0.02, 0);
+        const totemTrunk = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.36, 0.12), slateMat);
+        totemTrunk.position.set(0, 0.18, 0);
+
+        // Carved Totem Brow, Glowing Storm Eyes & Golden Thunderbird Beak facing player/forward
+        const brow = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.035, 0.14), stormCloudMat);
+        brow.position.set(0, 0.27, 0);
+        const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.025, 0.135), cyanEyeMat);
+        eyeL.position.set(-0.036, 0.235, 0);
+        const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.025, 0.135), cyanEyeMat);
+        eyeR.position.set(0.036, 0.235, 0);
+        const beak = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.09, 4), boltMat);
+        beak.rotation.x = -Math.PI / 2;
+        beak.position.set(0, 0.19, -0.09);
+
+        // Multi-tiered Outstretched Thunderbird Wings
+        const upperWings = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.065, 0.04), primaryMat);
+        upperWings.position.set(0, 0.24, 0.02);
+        const lowerWings = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.05, 0.04), secondaryMat);
+        lowerWings.position.set(0, 0.17, 0.02);
+
+        // Hovering 3D Storm Cloud & Jagged Lightning Bolt Crest
+        const cloudCenter = new THREE.Mesh(new THREE.DodecahedronGeometry(0.085, 0), stormCloudMat);
+        cloudCenter.position.set(0, 0.4, 0);
+        const cloudLeft = new THREE.Mesh(new THREE.DodecahedronGeometry(0.06, 0), stormCloudMat);
+        cloudLeft.position.set(-0.07, 0.39, 0);
+        const cloudRight = new THREE.Mesh(new THREE.DodecahedronGeometry(0.06, 0), stormCloudMat);
+        cloudRight.position.set(0.07, 0.39, 0);
+        const lightningTop = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.15, 4), boltMat);
+        lightningTop.position.set(0, 0.5, 0);
+        lightningTop.rotation.z = -0.28;
+
+        this.heldMeshGroup.add(
+          basePedestal,
+          totemTrunk,
+          brow,
+          eyeL,
+          eyeR,
+          beak,
+          upperWings,
+          lowerWings,
+          cloudCenter,
+          cloudLeft,
+          cloudRight,
+          lightningTop
+        );
+        return;
+      }
+
+      // Carved Wooden/Stone Totem Idol (Sundial Totem & Boss Summoning Effigies)
+      const base = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.06, 0.15), handleMat);
+      base.position.set(0, -0.02, 0);
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.35, 0.12), handleMat);
+      pillar.position.set(0, 0.17, 0);
+      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.035, 0.14), primaryMat);
+      brow.position.set(0, 0.26, 0);
+      const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.025, 0.135), glowMat);
+      eyes.position.set(0, 0.225, 0);
+      const nose = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.07, 0.15), secondaryMat);
+      nose.position.set(0, 0.18, 0);
+      const upperWings = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.07, 0.045), primaryMat);
+      upperWings.position.set(0, 0.22, 0.02);
+      const lowerWings = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.05, 0.045), secondaryMat);
+      lowerWings.position.set(0, 0.15, 0.02);
+      const crest = new THREE.Mesh(new THREE.OctahedronGeometry(0.085, 0), glowMat);
+      crest.position.set(0, 0.42, 0);
+      const halo = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.018, 6, 16), primaryMat);
+      halo.position.set(0, 0.42, 0);
+      this.heldMeshGroup.add(base, pillar, brow, eyes, nose, upperWings, lowerWings, crest, halo);
       return;
     }
 
