@@ -280,6 +280,37 @@ export class TextureAtlasManager {
       }
 
       case 'scythe': {
+        if (item.id === 'leviathan_trident') {
+          // 3-Pronged Abyssal Sea-Trident Slot Icon!
+          ctx.strokeStyle = '#fde047';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(9, 39);
+          ctx.lineTo(31, 17);
+          ctx.stroke();
+
+          // Trident cross-crown
+          ctx.strokeStyle = '#fde047';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(22, 14);
+          ctx.quadraticCurveTo(28, 20, 34, 26);
+          ctx.stroke();
+
+          // 3 Barbed Turquoise Prongs
+          ctx.strokeStyle = '#2dd4bf';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(30, 18);
+          ctx.lineTo(41, 7);
+          ctx.moveTo(24, 15);
+          ctx.lineTo(34, 5);
+          ctx.moveTo(33, 24);
+          ctx.lineTo(43, 14);
+          ctx.stroke();
+          break;
+        }
+
         ctx.strokeStyle = '#78350f';
         ctx.lineWidth = 4.5;
         ctx.beginPath();
@@ -429,6 +460,51 @@ export class TextureAtlasManager {
 
       case 'essence':
       case 'core': {
+        if (item.id === 'sovereign_crown_shard') {
+          // IMPERIAL CROWN OF AETHELGARD: Amethyst Velvet Cap + 5 Golden Spires + Seafoam Leviathan Gem!
+          ctx.fillStyle = '#7e22ce';
+          ctx.beginPath();
+          ctx.arc(24, 28, 13, Math.PI, 0);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.fillStyle = '#fde047';
+          ctx.beginPath();
+          ctx.moveTo(8, 35);
+          ctx.lineTo(6, 17);
+          ctx.lineTo(15, 25);
+          ctx.lineTo(19, 13);
+          ctx.lineTo(24, 23);
+          ctx.lineTo(29, 13);
+          ctx.lineTo(33, 25);
+          ctx.lineTo(42, 17);
+          ctx.lineTo(40, 35);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = '#ca8a04';
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+
+          // Jeweled Royal Band & Center Teal Leviathan Gem
+          ctx.fillStyle = '#eab308';
+          ctx.fillRect(8, 33, 32, 6);
+          ctx.strokeStyle = '#fef08a';
+          ctx.strokeRect(8, 33, 32, 6);
+          ctx.fillStyle = '#2dd4bf';
+          ctx.beginPath();
+          ctx.arc(24, 30, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#e879f9';
+          ctx.fillRect(13, 34.5, 3, 3);
+          ctx.fillRect(32, 34.5, 3, 3);
+          // Floating Sovereign Star
+          ctx.fillStyle = '#fef08a';
+          ctx.beginPath();
+          ctx.arc(24, 7, 3, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+
         const grad = ctx.createRadialGradient(24, 24, 3, 24, 24, 16);
         grad.addColorStop(0, s);
         grad.addColorStop(1, p);
@@ -554,90 +630,305 @@ export class TextureAtlasManager {
         }
 
         if (item.id === 'sundial_totem') {
-          // Carved Wooden Sundial Totem Pole + Sun/Moon Halo Crest!
-          // Outstretched Solar Wings
-          ctx.fillStyle = p;
+          // SUNDIAL TOTEM: Split Day/Night Chronos Totem + Radiant Sun/Crescent Sundial Ring!
+          // Left Golden Solar Wing & Right Lunar Silver-Blue Wing
+          ctx.fillStyle = '#facc15';
           ctx.beginPath();
-          ctx.moveTo(24, 20);
-          ctx.lineTo(5, 16);
-          ctx.lineTo(8, 26);
-          ctx.lineTo(40, 26);
-          ctx.lineTo(43, 16);
+          ctx.moveTo(24, 21);
+          ctx.lineTo(4, 17);
+          ctx.lineTo(7, 27);
+          ctx.lineTo(24, 27);
           ctx.closePath();
           ctx.fill();
 
-          // Carved Cedar Totem Trunk & Pedestal
-          ctx.fillStyle = '#78350f';
-          ctx.fillRect(14, 40, 20, 5);
-          ctx.fillStyle = '#92400e';
-          ctx.fillRect(16, 16, 16, 25);
-          ctx.strokeStyle = '#451a03';
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(16, 16, 16, 25);
-
-          // Carved Totem Face
-          ctx.fillStyle = '#fef08a';
-          ctx.fillRect(18, 20, 4, 3);
-          ctx.fillRect(26, 20, 4, 3);
           ctx.fillStyle = '#38bdf8';
-          ctx.fillRect(22, 23, 4, 5);
-          ctx.fillStyle = '#fde047';
-          ctx.fillRect(18, 30, 12, 3);
+          ctx.beginPath();
+          ctx.moveTo(24, 21);
+          ctx.lineTo(44, 17);
+          ctx.lineTo(41, 27);
+          ctx.lineTo(24, 27);
+          ctx.closePath();
+          ctx.fill();
 
-          // Glowing Sundial Ring & Sun Crest on top
+          // Carved Cedar Totem Trunk (split warm/cool halves) & Pedestal
+          ctx.fillStyle = '#78350f';
+          ctx.fillRect(13, 40, 22, 5);
+          ctx.fillStyle = '#b45309';
+          ctx.fillRect(16, 18, 8, 23);
+          ctx.fillStyle = '#1e3a8a';
+          ctx.fillRect(24, 18, 8, 23);
+          ctx.strokeStyle = '#fde047';
+          ctx.lineWidth = 1.4;
+          ctx.strokeRect(16, 18, 16, 23);
+
+          // Split Sun/Moon Totem Face
+          ctx.fillStyle = '#fef08a';
+          ctx.fillRect(18, 22, 4, 3);
+          ctx.fillStyle = '#bae6fd';
+          ctx.fillRect(26, 22, 4, 3);
+          ctx.fillStyle = '#fde047';
+          ctx.fillRect(19, 31, 10, 3);
+
+          // Large Sundial Compass Ring + Sun Rays on Top
           ctx.strokeStyle = '#fde047';
           ctx.lineWidth = 2.5;
           ctx.beginPath();
           ctx.arc(24, 10, 6.5, 0, Math.PI * 2);
           ctx.stroke();
-          ctx.fillStyle = '#38bdf8';
+          // Gnomon pointer needle
           ctx.beginPath();
-          ctx.arc(24, 10, 3.5, 0, Math.PI * 2);
+          ctx.moveTo(24, 10);
+          ctx.lineTo(28, 5);
+          ctx.stroke();
+          ctx.fillStyle = '#f59e0b';
+          ctx.beginPath();
+          ctx.arc(24, 10, 3, 0, Math.PI * 2);
           ctx.fill();
           break;
         }
 
-        // Real Carved Boss-Effigy Totem Idol for Boss Summoning Relics!
-        // Carved Totem Wings
-        ctx.fillStyle = p;
-        ctx.beginPath();
-        ctx.moveTo(24, 18);
-        ctx.lineTo(4, 14);
-        ctx.lineTo(8, 26);
-        ctx.lineTo(40, 26);
-        ctx.lineTo(44, 14);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = s;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        if (item.id === 'totem_aethelgard') {
+          // ASTRAL ZENITH CROWN: Regal 5-Spire Starsteel Royal Crown (NOT a wooden totem!)
+          // Celestial Halo Ring hovering above crown
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(24, 8, 11, 3, 0, 0, Math.PI * 2);
+          ctx.stroke();
 
-        // Carved Stone/Wood Totem Pillar & Base
-        ctx.fillStyle = '#451a03';
-        ctx.fillRect(14, 40, 20, 5);
-        ctx.fillStyle = '#78350f';
-        ctx.fillRect(16, 12, 16, 29);
-        ctx.strokeStyle = s;
-        ctx.lineWidth = 1.6;
-        ctx.strokeRect(16, 12, 16, 29);
+          // 5 Pointed Golden Starsteel Crown Spires
+          const crownGrad = ctx.createLinearGradient(8, 14, 40, 38);
+          crownGrad.addColorStop(0, '#fef08a');
+          crownGrad.addColorStop(0.5, '#facc15');
+          crownGrad.addColorStop(1, '#d97706');
+          ctx.fillStyle = crownGrad;
+          ctx.beginPath();
+          ctx.moveTo(7, 37);
+          ctx.lineTo(5, 19);
+          ctx.lineTo(13, 27);
+          ctx.lineTo(17, 15);
+          ctx.lineTo(21, 25);
+          ctx.lineTo(24, 11);
+          ctx.lineTo(27, 25);
+          ctx.lineTo(31, 15);
+          ctx.lineTo(35, 27);
+          ctx.lineTo(43, 19);
+          ctx.lineTo(41, 37);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = '#fef9c3';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
 
-        // Carved Totem Mask Eyes, Nose & Glowing Horns
-        ctx.fillStyle = s;
-        ctx.fillRect(18, 18, 4, 3);
-        ctx.fillRect(26, 18, 4, 3);
+          // Royal Circlet Base Rim
+          ctx.fillStyle = '#b45309';
+          ctx.fillRect(7, 34, 34, 6);
+          ctx.strokeStyle = '#fde047';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(7, 34, 34, 6);
+
+          // Glowing Star-Sapphire Jewels on Spire Tips & Center Diamond
+          ctx.fillStyle = '#38bdf8';
+          for (const [jx, jy] of [
+            [5, 18],
+            [17, 14],
+            [24, 10],
+            [31, 14],
+            [43, 18],
+          ]) {
+            ctx.beginPath();
+            ctx.arc(jx, jy, 2.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // Center Starlight Jewel
+          ctx.fillStyle = '#38bdf8';
+          ctx.beginPath();
+          ctx.moveTo(24, 25);
+          ctx.lineTo(28, 30);
+          ctx.lineTo(24, 35);
+          ctx.lineTo(20, 30);
+          ctx.closePath();
+          ctx.fill();
+          break;
+        }
+
+        if (item.id === 'totem_sylvan_behemoth') {
+          // VERDANT EFFIGY (Boss I): Gnarled Living Treant Effigy with Roots & Leafy Canopy Antlers!
+          // Lush Leafy Canopy Crown + Branch Antlers
+          ctx.fillStyle = '#16a34a';
+          ctx.beginPath();
+          ctx.arc(16, 13, 6.5, 0, Math.PI * 2);
+          ctx.arc(24, 10, 7.5, 0, Math.PI * 2);
+          ctx.arc(32, 13, 6.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#4ade80';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Gnarled Ironwood Trunk & Splayed Roots at Base
+          ctx.fillStyle = '#5c3a21';
+          ctx.beginPath();
+          ctx.moveTo(17, 16);
+          ctx.lineTo(31, 16);
+          ctx.lineTo(33, 36);
+          ctx.lineTo(39, 43);
+          ctx.lineTo(28, 42);
+          ctx.lineTo(24, 38);
+          ctx.lineTo(20, 42);
+          ctx.lineTo(9, 43);
+          ctx.lineTo(15, 36);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = '#3f2e1e';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Glowing Amber Treant Eyes & Emerald Heart-Seed
+          ctx.fillStyle = '#facc15';
+          ctx.fillRect(19, 21, 4, 3);
+          ctx.fillRect(25, 21, 4, 3);
+          ctx.fillStyle = '#4ade80';
+          ctx.beginPath();
+          ctx.moveTo(24, 27);
+          ctx.lineTo(28, 32);
+          ctx.lineTo(24, 37);
+          ctx.lineTo(20, 32);
+          ctx.closePath();
+          ctx.fill();
+          break;
+        }
+
+        if (item.id === 'totem_cryonax') {
+          // PERMAFROST IDOL (Boss II): Sculpted Glacial Dragon-Skull Idol with Crystal Wings & Horns!
+          // Swept-Back Ice Dragon Wings
+          ctx.fillStyle = '#0284c7';
+          ctx.beginPath();
+          ctx.moveTo(24, 24);
+          ctx.lineTo(4, 12);
+          ctx.lineTo(9, 28);
+          ctx.lineTo(24, 32);
+          ctx.lineTo(39, 28);
+          ctx.lineTo(44, 12);
+          ctx.closePath();
+          ctx.fill();
+
+          //Swept Glacial Dragon Horns
+          ctx.fillStyle = '#e0f2fe';
+          ctx.beginPath();
+          ctx.moveTo(18, 17);
+          ctx.lineTo(10, 5);
+          ctx.lineTo(22, 15);
+          ctx.moveTo(30, 17);
+          ctx.lineTo(38, 5);
+          ctx.lineTo(26, 15);
+          ctx.fill();
+
+          // Crystalline Dragon Skull & Snout
+          ctx.fillStyle = '#38bdf8';
+          ctx.beginPath();
+          ctx.moveTo(15, 16);
+          ctx.lineTo(33, 16);
+          ctx.lineTo(30, 36);
+          ctx.lineTo(24, 42);
+          ctx.lineTo(18, 36);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = '#f0f9ff';
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+
+          // Glowing Dragon Eyes & Frost Fangs
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(18, 22, 4, 3);
+          ctx.fillRect(26, 22, 4, 3);
+          ctx.fillRect(20, 35, 2, 4);
+          ctx.fillRect(26, 35, 2, 4);
+          break;
+        }
+
+        if (item.id === 'totem_ignis_rex') {
+          // CINDER SIGIL (Boss III): Volcanic Obsidian Centipede Medallion + Pincers + Molten Core!
+          // Curved Molten Centipede Mandibles at Top & Sides
+          ctx.strokeStyle = '#fb923c';
+          ctx.lineWidth = 3.5;
+          ctx.beginPath();
+          ctx.arc(24, 13, 9, Math.PI * 0.9, Math.PI * 0.1, false);
+          ctx.stroke();
+
+          // Octagonal Obsidian Sigil Tablet
+          ctx.fillStyle = '#290f02';
+          ctx.beginPath();
+          ctx.moveTo(17, 12);
+          ctx.lineTo(31, 12);
+          ctx.lineTo(40, 21);
+          ctx.lineTo(40, 33);
+          ctx.lineTo(31, 42);
+          ctx.lineTo(17, 42);
+          ctx.lineTo(8, 33);
+          ctx.lineTo(8, 21);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = '#f97316';
+          ctx.lineWidth = 2.2;
+          ctx.stroke();
+
+          // Centipede Segmented Lava Spine & Blazing Solar Core
+          for (let seg = 0; seg < 3; seg++) {
+            ctx.fillStyle = seg === 1 ? '#fef08a' : '#ea580c';
+            ctx.fillRect(16, 18 + seg * 7, 16, 5);
+            // Tiny centipede legs on sides
+            ctx.strokeStyle = '#fde047';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.moveTo(10, 20 + seg * 7);
+            ctx.lineTo(15, 20 + seg * 7);
+            ctx.moveTo(33, 20 + seg * 7);
+            ctx.lineTo(38, 20 + seg * 7);
+            ctx.stroke();
+          }
+          break;
+        }
+
+        if (item.id === 'totem_malakor') {
+          // VOID RESONATOR (Boss IV): Abyssal Tuning-Fork Prongs + Levitating Singularity Eye!
+          // Obsidian Handle & Base
+          ctx.fillStyle = '#1e1b4b';
+          ctx.fillRect(21, 31, 6, 12);
+          ctx.fillRect(16, 40, 16, 4);
+
+          // Twin Curved Violet Tuning-Fork Prongs
+          ctx.strokeStyle = '#a855f7';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(13, 8);
+          ctx.quadraticCurveTo(10, 31, 24, 31);
+          ctx.quadraticCurveTo(38, 31, 35, 8);
+          ctx.stroke();
+          ctx.strokeStyle = '#f3e8ff';
+          ctx.lineWidth = 1.4;
+          ctx.stroke();
+
+          // Orbiting Rift Ring + Levitating Singularity Eye
+          ctx.strokeStyle = '#e879f9';
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.ellipse(24, 18, 12, 4, -0.35, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.fillStyle = '#fae8ff';
+          ctx.beginPath();
+          ctx.arc(24, 18, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#581c87';
+          ctx.fillRect(23, 14, 2, 8); // Slit void pupil
+          break;
+        }
+
+        // Fallback Carved Totem Idol
         ctx.fillStyle = p;
-        ctx.fillRect(22, 21, 4, 6);
-        ctx.fillRect(19, 30, 10, 4);
-        // Totem Crown Horns
-        ctx.fillStyle = s;
-        ctx.beginPath();
-        ctx.moveTo(16, 12);
-        ctx.lineTo(11, 5);
-        ctx.lineTo(20, 12);
-        ctx.moveTo(32, 12);
-        ctx.lineTo(37, 5);
-        ctx.lineTo(28, 12);
-        ctx.fill();
+        ctx.fillRect(16, 12, 16, 30);
+        ctx.strokeStyle = s;
+        ctx.strokeRect(16, 12, 16, 30);
         break;
       }
     }

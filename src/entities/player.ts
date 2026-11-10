@@ -883,6 +883,25 @@ export class PlayerController {
       this.heldMeshGroup.add(pommel, hilt, band1, band2);
 
       // Note: -Z is forward (direction of swing/strike), X is thin side-to-side
+      if (item.id === 'leviathan_trident') {
+        const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.72, 0.046), secondaryMat);
+        shaft.position.set(0, 0.22, 0);
+        const crossGuard = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.28), secondaryMat);
+        crossGuard.position.set(0, 0.54, 0);
+        const seaGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.055, 0), glowMat);
+        seaGem.position.set(0, 0.54, 0);
+        for (const zOff of [-0.11, 0, 0.11]) {
+          const prong = new THREE.Mesh(
+            new THREE.ConeGeometry(0.032, zOff === 0 ? 0.32 : 0.25, 4),
+            primaryMat
+          );
+          prong.position.set(0, zOff === 0 ? 0.72 : 0.68, zOff);
+          this.heldMeshGroup.add(prong);
+        }
+        this.heldMeshGroup.add(shaft, crossGuard, seaGem);
+        return;
+      }
+
       if (item.iconShape === 'scythe') {
         const pole = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.68, 0.048), handleMat);
         pole.position.set(0, 0.2, 0);
@@ -1041,9 +1060,61 @@ export class PlayerController {
       return;
     }
 
+    // Royal Crowns: Astral Zenith Crown (Final Boss Relic) & Crown of Aethelgard (Secret Boss Trophy)
+    if (item.id === 'totem_aethelgard' || item.id === 'sovereign_crown_shard') {
+      const isSovereign = item.id === 'sovereign_crown_shard';
+      const goldMat = new THREE.MeshLambertMaterial({
+        color: '#facc15',
+        emissive: '#ca8a04',
+        emissiveIntensity: 0.35,
+      });
+      const jewelMat = new THREE.MeshBasicMaterial({ color: isSovereign ? '#2dd4bf' : '#38bdf8' });
+      const velvetMat = new THREE.MeshLambertMaterial({ color: isSovereign ? '#7e22ce' : '#1e3a8a' });
+
+      const crownGroup = new THREE.Group();
+      crownGroup.position.set(0, 0.14, 0);
+      crownGroup.rotation.x = 0.22;
+
+      // Circular Golden Royal Circlet Rim
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.165, 0.075, 12, 1, true), goldMat);
+      band.material.side = THREE.DoubleSide;
+      const lowerTrim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.018, 6, 16), goldMat);
+      lowerTrim.rotation.x = Math.PI / 2;
+      lowerTrim.position.y = -0.035;
+      crownGroup.add(band, lowerTrim);
+
+      if (isSovereign) {
+        const velvetCap = new THREE.Mesh(new THREE.SphereGeometry(0.155, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), velvetMat);
+        velvetCap.position.y = -0.01;
+        crownGroup.add(velvetCap);
+      }
+
+      // 6 Pointed Golden Crown Spires + Spire-Tip Star Pearls around the rim
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const spireH = i % 2 === 0 ? 0.15 : 0.11;
+        const spire = new THREE.Mesh(new THREE.ConeGeometry(0.042, spireH, 4), goldMat);
+        spire.position.set(Math.cos(a) * 0.172, 0.035 + spireH * 0.5, Math.sin(a) * 0.172);
+        const pearl = new THREE.Mesh(new THREE.OctahedronGeometry(0.025, 0), jewelMat);
+        pearl.position.set(Math.cos(a) * 0.172, 0.04 + spireH, Math.sin(a) * 0.172);
+        crownGroup.add(spire, pearl);
+      }
+
+      // Floating Celestial Star / Halo above the Crown
+      const centerStar = new THREE.Mesh(new THREE.OctahedronGeometry(0.055, 0), jewelMat);
+      centerStar.position.set(0, 0.22, 0);
+      const upperHalo = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.012, 6, 16), jewelMat);
+      upperHalo.rotation.x = Math.PI / 2;
+      upperHalo.position.set(0, 0.25, 0);
+      crownGroup.add(centerStar, upperHalo);
+
+      this.heldMeshGroup.add(crownGroup);
+      return;
+    }
+
     if (item.iconShape === 'totem') {
       if (item.id === 'tempest_totem') {
-        // Unique 3D Carved Storm-Thunderbird Totem Pole!
+        // 1. TEMPEST TOTEM: Carved Storm-Thunderbird Totem Pole + Storm Clouds + Lightning!
         const slateMat = new THREE.MeshLambertMaterial({ color: '#475569' });
         const stormCloudMat = new THREE.MeshLambertMaterial({ color: '#1e293b' });
         const boltMat = new THREE.MeshBasicMaterial({ color: '#fde047' });
@@ -1054,7 +1125,6 @@ export class PlayerController {
         const totemTrunk = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.36, 0.12), slateMat);
         totemTrunk.position.set(0, 0.18, 0);
 
-        // Carved Totem Brow, Glowing Storm Eyes & Golden Thunderbird Beak facing player/forward
         const brow = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.035, 0.14), stormCloudMat);
         brow.position.set(0, 0.27, 0);
         const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.025, 0.135), cyanEyeMat);
@@ -1065,13 +1135,11 @@ export class PlayerController {
         beak.rotation.x = -Math.PI / 2;
         beak.position.set(0, 0.19, -0.09);
 
-        // Multi-tiered Outstretched Thunderbird Wings
         const upperWings = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.065, 0.04), primaryMat);
         upperWings.position.set(0, 0.24, 0.02);
         const lowerWings = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.05, 0.04), secondaryMat);
         lowerWings.position.set(0, 0.17, 0.02);
 
-        // Hovering 3D Storm Cloud & Jagged Lightning Bolt Crest
         const cloudCenter = new THREE.Mesh(new THREE.DodecahedronGeometry(0.085, 0), stormCloudMat);
         cloudCenter.position.set(0, 0.4, 0);
         const cloudLeft = new THREE.Mesh(new THREE.DodecahedronGeometry(0.06, 0), stormCloudMat);
@@ -1099,27 +1167,117 @@ export class PlayerController {
         return;
       }
 
-      // Carved Wooden/Stone Totem Idol (Sundial Totem & Boss Summoning Effigies)
-      const base = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.06, 0.15), handleMat);
-      base.position.set(0, -0.02, 0);
-      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.35, 0.12), handleMat);
-      pillar.position.set(0, 0.17, 0);
-      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.035, 0.14), primaryMat);
-      brow.position.set(0, 0.26, 0);
-      const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.025, 0.135), glowMat);
-      eyes.position.set(0, 0.225, 0);
-      const nose = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.07, 0.15), secondaryMat);
-      nose.position.set(0, 0.18, 0);
-      const upperWings = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.07, 0.045), primaryMat);
-      upperWings.position.set(0, 0.22, 0.02);
-      const lowerWings = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.05, 0.045), secondaryMat);
-      lowerWings.position.set(0, 0.15, 0.02);
-      const crest = new THREE.Mesh(new THREE.OctahedronGeometry(0.085, 0), glowMat);
-      crest.position.set(0, 0.42, 0);
-      const halo = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.018, 6, 16), primaryMat);
-      halo.position.set(0, 0.42, 0);
-      this.heldMeshGroup.add(base, pillar, brow, eyes, nose, upperWings, lowerWings, crest, halo);
-      return;
+      if (item.id === 'sundial_totem') {
+        // 2. SUNDIAL TOTEM: Split Day/Night Chronos Totem + Radiant Golden Sundial Ring!
+        const sunMat = new THREE.MeshBasicMaterial({ color: '#fde047' });
+        const nightMat = new THREE.MeshLambertMaterial({ color: '#1e3a8a' });
+        const base = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.15), handleMat);
+        base.position.set(0, -0.02, 0);
+        const leftHalf = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.32, 0.12), handleMat);
+        leftHalf.position.set(-0.034, 0.16, 0);
+        const rightHalf = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.32, 0.12), nightMat);
+        rightHalf.position.set(0.034, 0.16, 0);
+        const wingSun = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.065, 0.04), sunMat);
+        wingSun.position.set(-0.12, 0.22, 0);
+        const wingMoon = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.065, 0.04), secondaryMat);
+        wingMoon.position.set(0.12, 0.22, 0);
+        const dialRing = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.022, 6, 18), sunMat);
+        dialRing.position.set(0, 0.43, 0);
+        const sunOrb = new THREE.Mesh(new THREE.OctahedronGeometry(0.065, 0), secondaryMat);
+        sunOrb.position.set(0, 0.43, 0);
+        this.heldMeshGroup.add(base, leftHalf, rightHalf, wingSun, wingMoon, dialRing, sunOrb);
+        return;
+      }
+
+      if (item.id === 'totem_sylvan_behemoth') {
+        // 3. VERDANT EFFIGY (Boss I): Living Gnarled Treant Effigy with Roots & Leafy Canopy!
+        const barkMat = new THREE.MeshLambertMaterial({ color: '#5c3a21' });
+        const leafMat = new THREE.MeshLambertMaterial({ color: '#16a34a', emissive: '#15803d', emissiveIntensity: 0.25 });
+        const rootL = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.16, 4), barkMat);
+        rootL.position.set(-0.08, 0.0, 0);
+        rootL.rotation.z = 0.65;
+        const rootR = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.16, 4), barkMat);
+        rootR.position.set(0.08, 0.0, 0);
+        rootR.rotation.z = -0.65;
+        const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.34, 0.13), barkMat);
+        trunk.position.set(0, 0.16, 0);
+        const heartSeed = new THREE.Mesh(new THREE.OctahedronGeometry(0.065, 0), primaryMat);
+        heartSeed.position.set(0, 0.15, -0.07);
+        const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.025, 0.14), glowMat);
+        eyes.position.set(0, 0.25, 0);
+        const canopyTop = new THREE.Mesh(new THREE.DodecahedronGeometry(0.13, 0), leafMat);
+        canopyTop.position.set(0, 0.4, 0);
+        const canopyL = new THREE.Mesh(new THREE.DodecahedronGeometry(0.09, 0), leafMat);
+        canopyL.position.set(-0.1, 0.36, 0);
+        const canopyR = new THREE.Mesh(new THREE.DodecahedronGeometry(0.09, 0), leafMat);
+        canopyR.position.set(0.1, 0.36, 0);
+        this.heldMeshGroup.add(rootL, rootR, trunk, heartSeed, eyes, canopyTop, canopyL, canopyR);
+        return;
+      }
+
+      if (item.id === 'totem_cryonax') {
+        // 4. PERMAFROST IDOL (Boss II): Sculpted Glacial Dragon-Skull & Crystal Wings!
+        const skull = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.24), primaryMat);
+        skull.position.set(0, 0.2, -0.03);
+        const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 0.18, 6), secondaryMat);
+        pedestal.position.set(0, 0.05, 0);
+        for (const side of [-1, 1]) {
+          const horn = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.22, 4), glowMat);
+          horn.position.set(side * 0.08, 0.34, 0.04);
+          horn.rotation.x = -0.55;
+          horn.rotation.z = -side * 0.35;
+          const wing = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.26, 4), primaryMat);
+          wing.position.set(side * 0.18, 0.22, 0.02);
+          wing.rotation.z = -side * 1.1;
+          this.heldMeshGroup.add(horn, wing);
+        }
+        const frostPrism = new THREE.Mesh(new THREE.OctahedronGeometry(0.07, 0), glowMat);
+        frostPrism.position.set(0, 0.44, 0);
+        this.heldMeshGroup.add(pedestal, skull, frostPrism);
+        return;
+      }
+
+      if (item.id === 'totem_ignis_rex') {
+        // 5. CINDER SIGIL (Boss III): Volcanic Obsidian Centipede Medallion + Molten Mandibles!
+        const obsMat = new THREE.MeshLambertMaterial({ color: '#290f02' });
+        const tablet = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.06, 8), obsMat);
+        tablet.rotation.x = Math.PI / 2;
+        tablet.position.set(0, 0.2, 0);
+        const magmaCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.09, 0), glowMat);
+        magmaCore.position.set(0, 0.2, 0);
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.022, 6, 8), primaryMat);
+        rim.position.set(0, 0.2, 0);
+        for (const side of [-1, 1]) {
+          const pincer = new THREE.Mesh(new THREE.ConeGeometry(0.038, 0.18, 4), primaryMat);
+          pincer.position.set(side * 0.09, 0.42, 0);
+          pincer.rotation.z = side * 0.45;
+          this.heldMeshGroup.add(pincer);
+        }
+        this.heldMeshGroup.add(tablet, magmaCore, rim);
+        return;
+      }
+
+      if (item.id === 'totem_malakor') {
+        // 6. VOID RESONATOR (Boss IV): Abyssal Tuning-Fork Prongs + Levitating Singularity Eye!
+        const voidDark = new THREE.MeshLambertMaterial({ color: '#1e1b4b' });
+        const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.055, 0.18, 6), voidDark);
+        grip.position.set(0, 0.04, 0);
+        const crossBase = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.045, 0.06), primaryMat);
+        crossBase.position.set(0, 0.14, 0);
+        const prongL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.3, 0.05), primaryMat);
+        prongL.position.set(-0.11, 0.3, 0);
+        prongL.rotation.z = -0.08;
+        const prongR = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.3, 0.05), primaryMat);
+        prongR.position.set(0.11, 0.3, 0);
+        prongR.rotation.z = 0.08;
+        const singularity = new THREE.Mesh(new THREE.OctahedronGeometry(0.075, 0), glowMat);
+        singularity.position.set(0, 0.31, 0);
+        const riftRing = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.014, 6, 18), secondaryMat);
+        riftRing.position.set(0, 0.31, 0);
+        riftRing.rotation.x = 0.65;
+        this.heldMeshGroup.add(grip, crossBase, prongL, prongR, singularity, riftRing);
+        return;
+      }
     }
 
     // Default crystal/relic/potion held model
